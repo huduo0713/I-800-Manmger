@@ -1,0 +1,27 @@
+# Docker Compose配置文件
+version: '3.8'
+
+services:
+  # 应用服务
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data  # 挂载SQLite数据库文件
+      - ./manifest/config:/app/manifest/config
+    environment:
+      - ENV=docker
+    restart: unless-stopped
+    
+  # SQLite Web管理界面（可选）
+  sqlite-web:
+    image: coleifer/sqlite-web
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    command: ["sqlite-web", "/data/sqlite.db", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      - app
+    restart: unless-stopped
