@@ -1,4 +1,4 @@
-package user
+package algorithm
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 
-	"demo/api/user/v1"
+	"demo/api/algorithm/v1"
 )
 
 func (c *ControllerV1) Delete(ctx context.Context, req *v1.DeleteReq) (res *v1.DeleteRes, err error) {

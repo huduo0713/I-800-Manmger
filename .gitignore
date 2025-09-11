@@ -11,9 +11,12 @@ bin/
 gf
 main
 main.exe
+demo.exe
+*.exe
 output/
 manifest/output/
 temp/
 temp.yaml
 bin
 **/config/config.yaml
+平台与I-800的MQTT接口定义.md

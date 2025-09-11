@@ -11,66 +11,72 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// UserDao is the data access object for the table user.
-type UserDao struct {
+// AlgorithmDao is the data access object for the table algorithm.
+type AlgorithmDao struct {
 	table    string             // table is the underlying table name of the DAO.
 	group    string             // group is the database configuration group name of the current DAO.
-	columns  UserColumns        // columns contains all the column names of Table for convenient usage.
+	columns  AlgorithmColumns   // columns contains all the column names of Table for convenient usage.
 	handlers []gdb.ModelHandler // handlers for customized model modification.
 }
 
-// UserColumns defines and stores column names for the table user.
-type UserColumns struct {
-	Id        string //
-	Name      string //
-	Status    string //
-	Age       string //
-	CreatedAt string //
-	UpdatedAt string //
+// AlgorithmColumns defines and stores column names for the table algorithm.
+type AlgorithmColumns struct {
+	Id                 string //
+	AlgorithmId        string //
+	AlgorithmName      string //
+	AlgorithmVersion   string //
+	AlgorithmVersionId string //
+	AlgorithmDataUrl   string //
+	FileSize           string //
+	Md5                string //
+	LocalPath          string //
 }
 
-// userColumns holds the columns for the table user.
-var userColumns = UserColumns{
-	Id:        "id",
-	Name:      "name",
-	Status:    "status",
-	Age:       "age",
-	CreatedAt: "created_at",
-	UpdatedAt: "updated_at",
+// algorithmColumns holds the columns for the table algorithm.
+var algorithmColumns = AlgorithmColumns{
+	Id:                 "id",
+	AlgorithmId:        "algorithm_id",
+	AlgorithmName:      "algorithm_name",
+	AlgorithmVersion:   "algorithm_version",
+	AlgorithmVersionId: "algorithm_version_id",
+	AlgorithmDataUrl:   "algorithm_data_url",
+	FileSize:           "file_size",
+	Md5:                "md5",
+	LocalPath:          "local_path",
 }
 
-// NewUserDao creates and returns a new DAO object for table data access.
-func NewUserDao(handlers ...gdb.ModelHandler) *UserDao {
-	return &UserDao{
+// NewAlgorithmDao creates and returns a new DAO object for table data access.
+func NewAlgorithmDao(handlers ...gdb.ModelHandler) *AlgorithmDao {
+	return &AlgorithmDao{
 		group:    "default",
-		table:    "user",
-		columns:  userColumns,
+		table:    "algorithm",
+		columns:  algorithmColumns,
 		handlers: handlers,
 	}
 }
 
 // DB retrieves and returns the underlying raw database management object of the current DAO.
-func (dao *UserDao) DB() gdb.DB {
+func (dao *AlgorithmDao) DB() gdb.DB {
 	return g.DB(dao.group)
 }
 
 // Table returns the table name of the current DAO.
-func (dao *UserDao) Table() string {
+func (dao *AlgorithmDao) Table() string {
 	return dao.table
 }
 
 // Columns returns all column names of the current DAO.
-func (dao *UserDao) Columns() UserColumns {
+func (dao *AlgorithmDao) Columns() AlgorithmColumns {
 	return dao.columns
 }
 
 // Group returns the database configuration group name of the current DAO.
-func (dao *UserDao) Group() string {
+func (dao *AlgorithmDao) Group() string {
 	return dao.group
 }
 
 // Ctx creates and returns a Model for the current DAO. It automatically sets the context for the current operation.
-func (dao *UserDao) Ctx(ctx context.Context) *gdb.Model {
+func (dao *AlgorithmDao) Ctx(ctx context.Context) *gdb.Model {
 	model := dao.DB().Model(dao.table)
 	for _, handler := range dao.handlers {
 		model = handler(model)
@@ -84,6 +90,6 @@ func (dao *UserDao) Ctx(ctx context.Context) *gdb.Model {
 //
 // Note: Do not commit or roll back the transaction in function f,
 // as it is automatically handled by this function.
-func (dao *UserDao) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) (err error) {
+func (dao *AlgorithmDao) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) (err error) {
 	return dao.Ctx(ctx).Transaction(ctx, f)
 }

@@ -2,14 +2,10 @@
 // Code generated and maintained by GoFrame CLI tool. DO NOT EDIT.
 // =================================================================================
 
-package hello
+package entity
 
-import (
-	"context"
-
-	"demo/api/hello/v1"
-)
-
-type IHelloV1 interface {
-	Hello(ctx context.Context, req *v1.HelloReq) (res *v1.HelloRes, err error)
+// SqliteSequence is the golang structure for table sqlite_sequence.
+type SqliteSequence struct {
+	Name string `json:"name" orm:"name" description:""` //
+	Seq  string `json:"seq"  orm:"seq"  description:""` //
 }

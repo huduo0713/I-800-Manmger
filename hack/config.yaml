@@ -4,8 +4,13 @@
 gfcli:
   gen:
     dao:
-      - link: "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
+      - link: "sqlite::@file(./data/sqlite.db)"
         descriptionTag: true
+
+# 数据库配置  
+database:
+  default:
+    link: "sqlite::@file(./data/sqlite.db)"
 
   docker:
     build: "-a amd64 -s linux -p temp -ew"

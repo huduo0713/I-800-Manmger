@@ -9,13 +9,13 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-// User is the golang structure of table user for DAO operations like Where/Data.
-type User struct {
-	g.Meta    `orm:"table:user, do:true"`
+// MqttMessage is the golang structure of table mqtt_message for DAO operations like Where/Data.
+type MqttMessage struct {
+	g.Meta    `orm:"table:mqtt_message, do:true"`
 	Id        interface{} //
-	Name      interface{} //
-	Status    interface{} //
-	Age       interface{} //
+	Topic     interface{} //
+	Payload   interface{} //
+	Qos       interface{} //
+	Retained  interface{} //
 	CreatedAt *gtime.Time //
-	UpdatedAt *gtime.Time //
 }
