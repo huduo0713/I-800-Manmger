@@ -10,6 +10,7 @@ import (
 
 	"demo/internal/controller/algorithm"
 	"demo/internal/controller/user"
+	"demo/internal/service"
 )
 
 var (
@@ -20,6 +21,9 @@ var (
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
 			// 初始化数据库
 			initDatabase(ctx)
+
+			// 启动MQTT算法监听服务
+			startMQTTAlgorithmService(ctx)
 
 			s := g.Server()
 			s.Group("/", func(group *ghttp.RouterGroup) {
@@ -59,4 +63,25 @@ func initDatabase(ctx context.Context) {
 	}
 
 	g.Log().Info(ctx, "Database initialized successfully")
+}
+
+// startMQTTAlgorithmService 启动MQTT算法处理服务
+func startMQTTAlgorithmService(ctx context.Context) {
+	// 从配置文件获取设备ID，如果没有配置则使用默认值
+	deviceId := g.Cfg().MustGet(ctx, "device.id", "edge-device-001").String()
+
+	// 获取MQTT服务实例
+	mqttService := service.Mqtt()
+
+	// 启动算法消息监听
+	err := mqttService.StartAlgorithmMessageListener(deviceId)
+	if err != nil {
+		g.Log().Errorf(ctx, "启动MQTT算法监听服务失败: %v", err)
+		return
+	}
+
+	g.Log().Info(ctx, "MQTT算法处理服务启动成功", g.Map{
+		"deviceId": deviceId,
+		"topic":    "/sys/i800/" + deviceId + "/request",
+	})
 }

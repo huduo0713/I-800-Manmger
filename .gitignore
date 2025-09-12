@@ -20,3 +20,5 @@ temp.yaml
 bin
 **/config/config.yaml
 平台与I-800的MQTT接口定义.md
+./data/sqlite.db
+runtime/

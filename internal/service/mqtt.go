@@ -2,6 +2,9 @@ package service
 
 import (
 	"demo/internal/model/entity"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,15 +28,24 @@ var (
 // Mqtt 是获取 MQTT 服务单例的函数
 func Mqtt() *sMqtt {
 	mqttOnce.Do(func() {
+		ctx := gctx.New()
+
 		// --- MQTT 客户端配置 ---
-		// 使用公共的 EMQ X 测试服务器，你也可以换成自己的
-		broker := "tcp://broker.emqx.io:1883"
-		clientId := "goframe-mqtt-client-example"
+		// 从配置文件读取MQTT服务器配置
+		broker := g.Cfg().MustGet(ctx, "mqtt.broker", "tcp://127.0.0.1:1883").String()
+		clientId := g.Cfg().MustGet(ctx, "mqtt.clientId", "goframe-edge-device").String()
+		keepAlive := g.Cfg().MustGet(ctx, "mqtt.keepAlive", 60).Int()
+
+		g.Log().Info(ctx, "MQTT服务配置", g.Map{
+			"broker":    broker,
+			"clientId":  clientId,
+			"keepAlive": keepAlive,
+		})
 
 		opts := mqtt.NewClientOptions()
 		opts.AddBroker(broker)
 		opts.SetClientID(clientId)
-		opts.SetKeepAlive(60 * time.Second)
+		opts.SetKeepAlive(time.Duration(keepAlive) * time.Second)
 		// 设置一个默认的消息处理回调函数
 		opts.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
 			g.Log().Infof(gctx.New(), "MQTT Received Topic: %s, Payload: %s\n", msg.Topic(), msg.Payload())
@@ -150,4 +162,206 @@ func (s *sMqtt) GetStatus() map[string]interface{} {
 // IsConnected 检查MQTT是否连接
 func (s *sMqtt) IsConnected() bool {
 	return s.client.IsConnected()
+}
+
+// StartAlgorithmMessageListener 启动算法相关消息监听
+func (s *sMqtt) StartAlgorithmMessageListener(deviceId string) error {
+	// 订阅算法下发主题 /sys/i800/{deviceId}/request
+	topic := fmt.Sprintf("/sys/i800/%s/request", deviceId)
+
+	return s.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
+		ctx := gctx.New()
+		g.Log().Info(ctx, "收到算法处理请求", g.Map{
+			"topic":   msg.Topic(),
+			"payload": string(msg.Payload()),
+		})
+
+		go s.handleAlgorithmMessage(msg, deviceId)
+	})
+}
+
+// handleAlgorithmMessage 处理算法相关MQTT消息
+func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
+	ctx := gctx.New()
+
+	// 解析消息
+	var request AlgorithmAddRequest
+	if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+		g.Log().Error(ctx, "解析MQTT消息失败", g.Map{
+			"error":   err,
+			"payload": string(msg.Payload()),
+		})
+		return
+	}
+
+	// 根据方法类型处理
+	switch request.Method {
+	case "algorithm.add":
+		s.handleAlgorithmAdd(&request, deviceId)
+	case "algorithm.delete":
+		s.handleAlgorithmDelete(&request, deviceId)
+	case "algorithm.show":
+		s.handleAlgorithmShow(&request, deviceId)
+	case "algorithm.config":
+		s.handleAlgorithmConfig(&request, deviceId)
+	default:
+		g.Log().Warning(ctx, "未知的算法操作方法", g.Map{
+			"method": request.Method,
+		})
+	}
+}
+
+// handleAlgorithmAdd 处理算法添加请求
+func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
+	ctx := gctx.New()
+
+	// 创建响应结构
+	reply := AlgorithmReply{
+		CmdId:     req.CmdId,
+		Version:   req.Version,
+		Method:    req.Method,
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	// 参数验证
+	if req.Params.AlgorithmId == "" || req.Params.AlgorithmDataUrl == "" || req.Params.Md5 == "" {
+		reply.Code = CodeInvalidParams
+		reply.Message = "必要参数缺失"
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	// 创建算法下载服务
+	downloadService := NewAlgorithmDownloadService()
+
+	// 下载算法文件
+	localPath, err := downloadService.DownloadAlgorithmFile(
+		req.Params.AlgorithmId,
+		req.Params.Md5,
+		req.Params.AlgorithmDataUrl,
+	)
+	if err != nil {
+		g.Log().Error(ctx, "下载算法文件失败", g.Map{
+			"error":       err,
+			"algorithmId": req.Params.AlgorithmId,
+			"url":         req.Params.AlgorithmDataUrl,
+		})
+
+		// 根据错误类型设置错误码
+		if strings.Contains(err.Error(), "MD5校验失败") {
+			reply.Code = CodeMd5CheckFailed
+		} else if strings.Contains(err.Error(), "下载") {
+			reply.Code = CodeDownloadFailed
+		} else {
+			reply.Code = CodeFileSystemError
+		}
+		reply.Message = err.Error()
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	// 同步到数据库
+	err = downloadService.SyncAlgorithmToDatabase(req, localPath)
+	if err != nil {
+		g.Log().Error(ctx, "同步算法到数据库失败", g.Map{
+			"error":       err,
+			"algorithmId": req.Params.AlgorithmId,
+			"localPath":   localPath,
+		})
+
+		reply.Code = CodeDatabaseError
+		reply.Message = err.Error()
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	// 成功响应
+	reply.Code = CodeSuccess
+	reply.Message = "算法添加成功"
+	reply.Data = map[string]interface{}{
+		"localPath":   localPath,
+		"algorithmId": req.Params.AlgorithmId,
+		"version":     req.Params.AlgorithmVersion,
+	}
+
+	g.Log().Info(ctx, "算法添加完成", g.Map{
+		"algorithmId": req.Params.AlgorithmId,
+		"version":     req.Params.AlgorithmVersion,
+		"localPath":   localPath,
+	})
+
+	s.sendAlgorithmReply(&reply, deviceId)
+}
+
+// handleAlgorithmDelete 处理算法删除请求 (占位符实现)
+func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmAddRequest, deviceId string) {
+	reply := AlgorithmReply{
+		CmdId:     req.CmdId,
+		Version:   req.Version,
+		Method:    req.Method,
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "algorithm.delete 功能待实现",
+	}
+	s.sendAlgorithmReply(&reply, deviceId)
+}
+
+// handleAlgorithmShow 处理算法展示请求 (占位符实现)
+func (s *sMqtt) handleAlgorithmShow(req *AlgorithmAddRequest, deviceId string) {
+	reply := AlgorithmReply{
+		CmdId:     req.CmdId,
+		Version:   req.Version,
+		Method:    req.Method,
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "algorithm.show 功能待实现",
+	}
+	s.sendAlgorithmReply(&reply, deviceId)
+}
+
+// handleAlgorithmConfig 处理算法配置请求 (占位符实现)
+func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmAddRequest, deviceId string) {
+	reply := AlgorithmReply{
+		CmdId:     req.CmdId,
+		Version:   req.Version,
+		Method:    req.Method,
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "algorithm.config 功能待实现",
+	}
+	s.sendAlgorithmReply(&reply, deviceId)
+}
+
+// sendAlgorithmReply 发送算法处理结果响应
+func (s *sMqtt) sendAlgorithmReply(reply *AlgorithmReply, deviceId string) {
+	ctx := gctx.New()
+
+	// 响应主题 /sys/i800/{deviceId}/reply
+	replyTopic := fmt.Sprintf("/sys/i800/%s/reply", deviceId)
+
+	// 序列化响应消息
+	replyJson, err := json.Marshal(reply)
+	if err != nil {
+		g.Log().Error(ctx, "序列化响应消息失败", g.Map{
+			"error": err,
+			"reply": reply,
+		})
+		return
+	}
+
+	// 发送响应
+	err = s.Publish(replyTopic, 0, false, replyJson)
+	if err != nil {
+		g.Log().Error(ctx, "发送算法响应失败", g.Map{
+			"error": err,
+			"topic": replyTopic,
+			"reply": string(replyJson),
+		})
+	} else {
+		g.Log().Info(ctx, "算法响应发送成功", g.Map{
+			"topic": replyTopic,
+			"cmdId": reply.CmdId,
+			"code":  reply.Code,
+		})
+	}
 }
