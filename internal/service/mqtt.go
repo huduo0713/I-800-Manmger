@@ -3,7 +3,6 @@ package service
 import (
 	"demo/internal/model/entity"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -166,11 +165,20 @@ func (s *sMqtt) IsConnected() bool {
 
 // StartAlgorithmMessageListener 启动算法相关消息监听
 func (s *sMqtt) StartAlgorithmMessageListener(deviceId string) error {
-	// 订阅算法下发主题 /sys/i800/{deviceId}/request
-	topic := fmt.Sprintf("/sys/i800/%s/request", deviceId)
+	ctx := gctx.New()
+
+	// 从配置文件读取算法请求主题模板
+	requestTopicTemplate := g.Cfg().MustGet(ctx, "mqtt.topics.algorithm.request", "/sys/i800/{deviceId}/request").String()
+
+	// 替换deviceId占位符
+	topic := strings.Replace(requestTopicTemplate, "{deviceId}", deviceId, -1)
+
+	g.Log().Info(ctx, "算法监听服务配置", g.Map{
+		"requestTopic": topic,
+		"deviceId":     deviceId,
+	})
 
 	return s.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
-		ctx := gctx.New()
 		g.Log().Info(ctx, "收到算法处理请求", g.Map{
 			"topic":   msg.Topic(),
 			"payload": string(msg.Payload()),
@@ -184,9 +192,16 @@ func (s *sMqtt) StartAlgorithmMessageListener(deviceId string) error {
 func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
 	ctx := gctx.New()
 
-	// 解析消息
-	var request AlgorithmAddRequest
-	if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+	// 先解析基本结构，确定方法类型
+	var baseRequest struct {
+		CmdId     string          `json:"cmdId"`
+		Version   string          `json:"version"`
+		Method    string          `json:"method"`
+		Timestamp string          `json:"timestamp"`
+		Params    json.RawMessage `json:"params"`
+	}
+
+	if err := json.Unmarshal(msg.Payload(), &baseRequest); err != nil {
 		g.Log().Error(ctx, "解析MQTT消息失败", g.Map{
 			"error":   err,
 			"payload": string(msg.Payload()),
@@ -195,18 +210,50 @@ func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
 	}
 
 	// 根据方法类型处理
-	switch request.Method {
+	switch baseRequest.Method {
 	case "algorithm.add":
+		var request AlgorithmAddRequest
+		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+			g.Log().Error(ctx, "解析algorithm.add消息失败", g.Map{
+				"error":   err,
+				"payload": string(msg.Payload()),
+			})
+			return
+		}
 		s.handleAlgorithmAdd(&request, deviceId)
 	case "algorithm.delete":
-		s.handleAlgorithmDelete(&request, deviceId)
+		var request AlgorithmDeleteRequest
+		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+			g.Log().Error(ctx, "解析algorithm.delete消息失败", g.Map{
+				"error":   err,
+				"payload": string(msg.Payload()),
+			})
+			return
+		}
+		s.handleAlgorithmDeleteCorrect(&request, deviceId)
 	case "algorithm.show":
+		var request AlgorithmAddRequest
+		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+			g.Log().Error(ctx, "解析algorithm.show消息失败", g.Map{
+				"error":   err,
+				"payload": string(msg.Payload()),
+			})
+			return
+		}
 		s.handleAlgorithmShow(&request, deviceId)
 	case "algorithm.config":
+		var request AlgorithmAddRequest
+		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
+			g.Log().Error(ctx, "解析algorithm.config消息失败", g.Map{
+				"error":   err,
+				"payload": string(msg.Payload()),
+			})
+			return
+		}
 		s.handleAlgorithmConfig(&request, deviceId)
 	default:
 		g.Log().Warning(ctx, "未知的算法操作方法", g.Map{
-			"method": request.Method,
+			"method": baseRequest.Method,
 		})
 	}
 }
@@ -293,16 +340,67 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 
-// handleAlgorithmDelete 处理算法删除请求 (占位符实现)
-func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmAddRequest, deviceId string) {
+// handleAlgorithmDeleteCorrect 处理算法删除请求（使用正确的结构体）
+func (s *sMqtt) handleAlgorithmDeleteCorrect(req *AlgorithmDeleteRequest, deviceId string) {
+	ctx := gctx.New()
+
+	// 创建响应结构
 	reply := AlgorithmReply{
 		CmdId:     req.CmdId,
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
-		Code:      CodeSuccess,
-		Message:   "algorithm.delete 功能待实现",
 	}
+
+	// 参数验证
+	algorithmId := req.Params.AlgorithmId
+	if algorithmId == "" {
+		reply.Code = CodeInvalidParams
+		reply.Message = "算法ID不能为空"
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	g.Log().Info(ctx, "开始处理算法删除请求", g.Map{
+		"algorithmId": algorithmId,
+		"deviceId":    deviceId,
+	})
+
+	// 创建算法删除服务实例
+	deleteService := NewAlgorithmDeleteService()
+
+	// 执行算法删除
+	err := deleteService.DeleteAlgorithm(algorithmId)
+	if err != nil {
+		g.Log().Error(ctx, "删除算法失败", g.Map{
+			"algorithmId": algorithmId,
+			"error":       err,
+		})
+
+		// 根据错误类型设置错误码
+		if strings.Contains(err.Error(), "算法不存在") {
+			reply.Code = CodeAlgorithmNotFound
+		} else if strings.Contains(err.Error(), "数据库") {
+			reply.Code = CodeDatabaseError
+		} else {
+			reply.Code = CodeFileSystemError
+		}
+		reply.Message = err.Error()
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	// 成功响应
+	reply.Code = CodeSuccess
+	reply.Message = "算法删除成功"
+	reply.Data = map[string]interface{}{
+		"algorithmId": algorithmId,
+	}
+
+	g.Log().Info(ctx, "算法删除完成", g.Map{
+		"algorithmId": algorithmId,
+	})
+
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 
@@ -336,8 +434,11 @@ func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmAddRequest, deviceId string)
 func (s *sMqtt) sendAlgorithmReply(reply *AlgorithmReply, deviceId string) {
 	ctx := gctx.New()
 
-	// 响应主题 /sys/i800/{deviceId}/reply
-	replyTopic := fmt.Sprintf("/sys/i800/%s/reply", deviceId)
+	// 从配置文件读取算法响应主题模板
+	replyTopicTemplate := g.Cfg().MustGet(ctx, "mqtt.topics.algorithm.reply", "/sys/i800/{deviceId}/reply").String()
+
+	// 替换deviceId占位符
+	replyTopic := strings.Replace(replyTopicTemplate, "{deviceId}", deviceId, -1)
 
 	// 序列化响应消息
 	replyJson, err := json.Marshal(reply)

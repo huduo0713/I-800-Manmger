@@ -9,51 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"demo/internal/dao"
 	"demo/internal/model/do"
-)
-
-// AlgorithmAddRequest 算法添加请求结构
-type AlgorithmAddRequest struct {
-	CmdId     string `json:"cmdId"`
-	Version   string `json:"version"`
-	Method    string `json:"method"`
-	Timestamp string `json:"timestamp"`
-	Params    struct {
-		AlgorithmId        string `json:"algorithmId"`
-		AlgorithmName      string `json:"algorithmName"`
-		AlgorithmVersion   string `json:"algorithmVersion"`
-		AlgorithmVersionId string `json:"algorithmVersionId"`
-		AlgorithmDataUrl   string `json:"algorithmDataUrl"`
-		FileSize           int64  `json:"fileSize"`
-		LastModifyTime     string `json:"lastModifyTime"`
-		Md5                string `json:"md5"`
-	} `json:"params"`
-}
-
-// AlgorithmReply 算法操作响应结构
-type AlgorithmReply struct {
-	CmdId     string      `json:"cmdId"`
-	Version   string      `json:"version"`
-	Method    string      `json:"method"`
-	Timestamp string      `json:"timestamp"`
-	Code      int         `json:"code"`
-	Message   string      `json:"message"`
-	Data      interface{} `json:"data"`
-}
-
-// 错误码定义
-const (
-	CodeSuccess         = 0
-	CodeDownloadFailed  = 1001
-	CodeMd5CheckFailed  = 1002
-	CodeFileSystemError = 1003
-	CodeDatabaseError   = 1004
-	CodeInvalidParams   = 1005
 )
 
 // AlgorithmDownloadService 算法下载服务
@@ -112,17 +74,29 @@ func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, md5sum, ur
 
 	resp, err := http.Get(url)
 	if err != nil {
+		// 下载失败，清理创建的目录
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
 		return "", fmt.Errorf("下载文件失败: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// 确保响应体总是被关闭
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
+		// HTTP状态码异常，等待一小段时间再清理目录
+		time.Sleep(100 * time.Millisecond) // 给系统时间释放文件句柄
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
 		return "", fmt.Errorf("下载失败，HTTP状态码: %d", resp.StatusCode)
 	}
 
 	// 创建文件
 	file, err := os.Create(targetPath)
 	if err != nil {
+		// 文件创建失败，清理创建的目录
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
 		return "", fmt.Errorf("创建文件失败: %v", err)
 	}
 	defer file.Close()
@@ -133,14 +107,16 @@ func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, md5sum, ur
 
 	_, err = io.Copy(writer, resp.Body)
 	if err != nil {
-		os.Remove(targetPath) // 清理失败的文件
+		os.Remove(targetPath) // 删除不完整的文件
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
 		return "", fmt.Errorf("写入文件失败: %v", err)
 	}
 
 	// 验证MD5
 	calculatedMD5 := hex.EncodeToString(hash.Sum(nil))
 	if calculatedMD5 != md5sum {
-		os.Remove(targetPath) // MD5不匹配，删除文件
+		os.Remove(targetPath) // 删除MD5不匹配的文件
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
 		return "", fmt.Errorf("MD5校验失败，期望: %s, 实际: %s", md5sum, calculatedMD5)
 	}
 
@@ -185,25 +161,37 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 			"version":     req.Params.AlgorithmVersion,
 		})
 	} else {
-		// 更新现有记录，进行版本比较
+		// 算法已存在，进行覆盖更新
 		existingVersion := existing["algorithm_version"].String()
+		oldLocalPath := existing["local_path"].String()
+
+		// 无论版本是否相同，都要清理旧文件（实现真正的覆盖）
+		if oldLocalPath != "" && oldLocalPath != localPath {
+			// 清理旧算法的整个目录
+			oldDir := filepath.Dir(filepath.Dir(oldLocalPath)) // 获取 algorithmId 级别的目录
+			if err := os.RemoveAll(oldDir); err != nil {
+				g.Log().Warning(ctx, "删除旧算法目录失败", g.Map{
+					"oldDir": oldDir,
+					"error":  err,
+				})
+			} else {
+				g.Log().Info(ctx, "清理旧算法目录成功", g.Map{
+					"oldDir": oldDir,
+				})
+			}
+		}
+
 		if req.Params.AlgorithmVersion != existingVersion {
 			g.Log().Info(ctx, "检测到算法版本变更", g.Map{
 				"algorithmId":     req.Params.AlgorithmId,
 				"existingVersion": existingVersion,
 				"newVersion":      req.Params.AlgorithmVersion,
 			})
-
-			// 删除旧文件（如果路径不同）
-			oldLocalPath := existing["local_path"].String()
-			if oldLocalPath != "" && oldLocalPath != localPath {
-				if err := os.RemoveAll(filepath.Dir(oldLocalPath)); err != nil {
-					g.Log().Warning(ctx, "删除旧算法文件失败", g.Map{
-						"oldPath": oldLocalPath,
-						"error":   err,
-					})
-				}
-			}
+		} else {
+			g.Log().Info(ctx, "覆盖相同版本算法", g.Map{
+				"algorithmId": req.Params.AlgorithmId,
+				"version":     req.Params.AlgorithmVersion,
+			})
 		}
 
 		// 更新记录
@@ -214,11 +202,115 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 		if err != nil {
 			return fmt.Errorf("更新算法记录失败: %v", err)
 		}
-		g.Log().Info(ctx, "更新算法记录成功", g.Map{
+		g.Log().Info(ctx, "算法覆盖更新成功", g.Map{
 			"algorithmId": req.Params.AlgorithmId,
 			"version":     req.Params.AlgorithmVersion,
 		})
 	}
 
 	return nil
+}
+
+// cleanupDirectoryOnFailure 下载失败时清理创建的空目录
+func (s *AlgorithmDownloadService) cleanupDirectoryOnFailure(targetDir, algorithmId string) {
+	ctx := gctx.New()
+
+	g.Log().Info(ctx, "开始清理失败目录", g.Map{
+		"targetDir":   targetDir,
+		"algorithmId": algorithmId,
+	})
+
+	// 1. 延迟一小段时间，确保文件句柄完全释放
+	time.Sleep(100 * time.Millisecond)
+
+	// 2. 先尝试删除md5sum目录（targetDir本身）
+	if err := s.removeDirectoryWithRetry(targetDir, 3); err != nil {
+		g.Log().Warning(ctx, "清理MD5目录失败", g.Map{
+			"targetDir": targetDir,
+			"error":     err,
+		})
+	} else {
+		g.Log().Info(ctx, "清理MD5目录成功", g.Map{
+			"targetDir": targetDir,
+		})
+	}
+
+	// 3. 尝试删除algorithmId目录（如果为空的话）
+	algorithmDir := filepath.Join(s.downloadPath, algorithmId)
+
+	// 检查算法目录是否为空
+	if isEmpty, err := s.isDirEmpty(algorithmDir); err != nil {
+		g.Log().Warning(ctx, "检查算法目录状态失败", g.Map{
+			"algorithmDir": algorithmDir,
+			"error":        err,
+		})
+	} else if isEmpty {
+		// 目录为空，可以安全删除
+		if err := s.removeDirectoryWithRetry(algorithmDir, 3); err != nil {
+			g.Log().Warning(ctx, "清理空算法目录失败", g.Map{
+				"algorithmDir": algorithmDir,
+				"error":        err,
+			})
+		} else {
+			g.Log().Info(ctx, "清理空算法目录成功", g.Map{
+				"algorithmDir": algorithmDir,
+			})
+		}
+	} else {
+		g.Log().Debug(ctx, "算法目录不为空，跳过清理", g.Map{
+			"algorithmDir": algorithmDir,
+		})
+	}
+}
+
+// removeDirectoryWithRetry 带重试的目录删除
+func (s *AlgorithmDownloadService) removeDirectoryWithRetry(dirPath string, maxRetries int) error {
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			// 每次重试前等待一段时间
+			time.Sleep(time.Duration(i*200) * time.Millisecond)
+		}
+
+		// 检查目录是否存在
+		if _, statErr := os.Stat(dirPath); os.IsNotExist(statErr) {
+			return nil // 目录不存在，删除成功
+		}
+
+		// 尝试删除
+		err = os.RemoveAll(dirPath)
+		if err == nil {
+			return nil // 删除成功
+		}
+
+		g.Log().Debug(gctx.New(), "目录删除重试", g.Map{
+			"dirPath":    dirPath,
+			"attempt":    i + 1,
+			"maxRetries": maxRetries,
+			"error":      err,
+		})
+	}
+	return err
+}
+
+// isDirEmpty 检查目录是否为空
+func (s *AlgorithmDownloadService) isDirEmpty(dirPath string) (bool, error) {
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil // 目录不存在，视为空
+		}
+		return false, err
+	}
+	defer dir.Close()
+
+	// 尝试读取一个目录项
+	_, err = dir.Readdir(1)
+	if err == io.EOF {
+		return true, nil // 没有内容，目录为空
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil // 有内容，目录不为空
 }
