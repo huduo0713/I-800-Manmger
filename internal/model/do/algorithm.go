@@ -6,6 +6,7 @@ package do
 
 import (
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 // Algorithm is the golang structure of table algorithm for DAO operations like Where/Data.
@@ -20,4 +21,6 @@ type Algorithm struct {
 	FileSize           interface{} //
 	Md5                interface{} //
 	LocalPath          interface{} //
+	CreatedAt          *gtime.Time //
+	UpdatedAt          *gtime.Time //
 }

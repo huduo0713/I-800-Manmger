@@ -34,9 +34,22 @@ CREATE TABLE IF NOT EXISTS `algorithm` (
   `algorithm_version_id` TEXT NOT NULL,
   `algorithm_data_url` TEXT NOT NULL,
   `file_size` INTEGER NOT NULL DEFAULT 0,
-  `md5` TEXT NOT NULL,
-  `local_path` TEXT -- 本地存储路径
+  `md5` TEXT NOT NULL CHECK(length(md5) = 32),  -- MD5必须是32位
+  `local_path` TEXT, -- 本地存储路径
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  
+  -- 复合唯一约束：同一算法ID+版本只能有一条记录
+  UNIQUE(algorithm_id, algorithm_version)
 );
+
+-- 创建触发器：自动更新updated_at时间戳
+CREATE TRIGGER IF NOT EXISTS algorithm_updated_at 
+AFTER UPDATE ON algorithm 
+FOR EACH ROW
+BEGIN
+  UPDATE algorithm SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
 
 -- 插入示例算法数据
 INSERT OR IGNORE INTO `algorithm` (

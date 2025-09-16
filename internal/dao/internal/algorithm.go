@@ -30,6 +30,8 @@ type AlgorithmColumns struct {
 	FileSize           string //
 	Md5                string //
 	LocalPath          string //
+	CreatedAt          string //
+	UpdatedAt          string //
 }
 
 // algorithmColumns holds the columns for the table algorithm.
@@ -43,6 +45,8 @@ var algorithmColumns = AlgorithmColumns{
 	FileSize:           "file_size",
 	Md5:                "md5",
 	LocalPath:          "local_path",
+	CreatedAt:          "created_at",
+	UpdatedAt:          "updated_at",
 }
 
 // NewAlgorithmDao creates and returns a new DAO object for table data access.

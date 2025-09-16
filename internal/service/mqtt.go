@@ -230,7 +230,7 @@ func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
 			})
 			return
 		}
-		s.handleAlgorithmDeleteCorrect(&request, deviceId)
+		s.handleAlgorithmDelete(&request, deviceId)
 	case "algorithm.show":
 		var request AlgorithmAddRequest
 		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
@@ -340,8 +340,8 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 
-// handleAlgorithmDeleteCorrect 处理算法删除请求（使用正确的结构体）
-func (s *sMqtt) handleAlgorithmDeleteCorrect(req *AlgorithmDeleteRequest, deviceId string) {
+// handleAlgorithmDelete 处理算法删除请求
+func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmDeleteRequest, deviceId string) {
 	ctx := gctx.New()
 
 	// 创建响应结构
