@@ -69,7 +69,7 @@ func (s *AlgorithmDeleteService) DeleteAlgorithmFiles(algorithmId string) error 
 	ctx := gctx.New()
 
 	// 构建算法目录路径
-	algorithmDir := filepath.Join(s.downloadPath, algorithmId)
+	algorithmDir := filepath.Join(s.downloadPath, "algorithm", algorithmId)
 
 	// 检查目录是否存在
 	if _, err := os.Stat(algorithmDir); os.IsNotExist(err) {

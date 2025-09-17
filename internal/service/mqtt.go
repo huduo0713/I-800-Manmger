@@ -284,8 +284,9 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 	// 下载算法文件
 	localPath, err := downloadService.DownloadAlgorithmFile(
 		req.Params.AlgorithmId,
-		req.Params.Md5,
+		req.Params.AlgorithmVersionId,
 		req.Params.AlgorithmDataUrl,
+		req.Params.Md5,
 	)
 	if err != nil {
 		g.Log().Error(ctx, "下载算法文件失败", g.Map{

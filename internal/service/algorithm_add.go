@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/zip"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -33,11 +35,11 @@ func NewAlgorithmDownloadService() *AlgorithmDownloadService {
 	// 如果配置文件未设置，使用默认路径
 	if downloadPath == "" {
 		if runtime.GOOS == "windows" {
-			// Windows环境：使用当前工作目录下的runtime文件夹
-			downloadPath = "./runtime"
+			// Windows环境：使用当前工作目录下的runtime/algorithm文件夹
+			downloadPath = "./runtime/algorithm"
 		} else {
-			// Linux/Unix环境：使用/usr/runtime
-			downloadPath = "/usr/runtime"
+			// Linux/Unix环境：使用/usr/runtime/algorithm
+			downloadPath = "/usr/runtime/algorithm"
 		}
 	}
 
@@ -52,9 +54,9 @@ func NewAlgorithmDownloadService() *AlgorithmDownloadService {
 }
 
 // DownloadAlgorithmFile 下载算法文件并验证MD5
-func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, md5sum, url string) (string, error) {
-	// 创建目标目录
-	targetDir := filepath.Join(s.downloadPath, algorithmId, md5sum)
+func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, algorithmVersionId, url, md5sum string) (string, error) {
+	// 创建目标目录: {algorithmId}/{algorithmVersionId}
+	targetDir := filepath.Join(s.downloadPath, algorithmId, algorithmVersionId)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return "", fmt.Errorf("创建目录失败: %v", err)
 	}
@@ -120,12 +122,32 @@ func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, md5sum, ur
 		return "", fmt.Errorf("MD5校验失败，期望: %s, 实际: %s", md5sum, calculatedMD5)
 	}
 
-	g.Log().Info(gctx.New(), "算法文件下载完成", g.Map{
+	g.Log().Info(gctx.New(), "算法文件MD5校验成功", g.Map{
 		"targetPath": targetPath,
 		"md5":        calculatedMD5,
 	})
 
-	return targetPath, nil
+	// MD5校验成功后，解压算法文件到同级目录
+	if err := s.extractAlgorithmFile(targetPath, targetDir); err != nil {
+		os.Remove(targetPath) // 删除压缩文件
+		s.cleanupDirectoryOnFailure(targetDir, algorithmId)
+		return "", fmt.Errorf("解压算法文件失败: %v", err)
+	}
+
+	// 解压成功后删除原始压缩文件
+	if err := os.Remove(targetPath); err != nil {
+		g.Log().Warning(gctx.New(), "删除压缩文件失败", g.Map{
+			"targetPath": targetPath,
+			"error":      err,
+		})
+	}
+
+	g.Log().Info(gctx.New(), "算法文件下载和解压完成", g.Map{
+		"targetDir": targetDir,
+		"md5":       calculatedMD5,
+	})
+
+	return targetDir, nil
 }
 
 // SyncAlgorithmToDatabase 同步算法信息到数据库
@@ -223,14 +245,14 @@ func (s *AlgorithmDownloadService) cleanupDirectoryOnFailure(targetDir, algorith
 	// 1. 延迟一小段时间，确保文件句柄完全释放
 	time.Sleep(100 * time.Millisecond)
 
-	// 2. 先尝试删除md5sum目录（targetDir本身）
+	// 2. 先尝试删除algorithmVersionId目录（targetDir本身）
 	if err := s.removeDirectoryWithRetry(targetDir, 3); err != nil {
-		g.Log().Warning(ctx, "清理MD5目录失败", g.Map{
+		g.Log().Warning(ctx, "清理版本目录失败", g.Map{
 			"targetDir": targetDir,
 			"error":     err,
 		})
 	} else {
-		g.Log().Info(ctx, "清理MD5目录成功", g.Map{
+		g.Log().Info(ctx, "清理版本目录成功", g.Map{
 			"targetDir": targetDir,
 		})
 	}
@@ -313,4 +335,88 @@ func (s *AlgorithmDownloadService) isDirEmpty(dirPath string) (bool, error) {
 		return false, err
 	}
 	return false, nil // 有内容，目录不为空
+}
+
+// extractAlgorithmFile 解压算法文件到指定目录
+func (s *AlgorithmDownloadService) extractAlgorithmFile(zipPath, targetDir string) error {
+	ctx := gctx.New()
+
+	g.Log().Info(ctx, "开始解压算法文件", g.Map{
+		"zipPath":   zipPath,
+		"targetDir": targetDir,
+	})
+
+	// 打开zip文件
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("打开zip文件失败: %v", err)
+	}
+	defer reader.Close()
+
+	// 解压每个文件
+	for _, file := range reader.File {
+		// 构建目标文件路径
+		destPath := filepath.Join(targetDir, file.Name)
+
+		// 防止目录遍历攻击（确保文件在目标目录内）
+		if !strings.HasPrefix(destPath, filepath.Clean(targetDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("文件路径不安全: %s", file.Name)
+		}
+
+		g.Log().Debug(ctx, "解压文件", g.Map{
+			"fileName": file.Name,
+			"destPath": destPath,
+		})
+
+		// 如果是目录，创建目录并继续
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(destPath, file.FileInfo().Mode()); err != nil {
+				return fmt.Errorf("创建目录失败 %s: %v", destPath, err)
+			}
+			continue
+		}
+
+		// 确保父目录存在
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return fmt.Errorf("创建父目录失败: %v", err)
+		}
+
+		// 打开zip中的文件
+		rc, err := file.Open()
+		if err != nil {
+			return fmt.Errorf("打开zip文件内容失败 %s: %v", file.Name, err)
+		}
+
+		// 创建目标文件
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("创建目标文件失败 %s: %v", destPath, err)
+		}
+
+		// 复制文件内容
+		_, err = io.Copy(destFile, rc)
+		destFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return fmt.Errorf("复制文件内容失败 %s: %v", destPath, err)
+		}
+
+		// 设置文件权限
+		if err := os.Chmod(destPath, file.FileInfo().Mode()); err != nil {
+			g.Log().Warning(ctx, "设置文件权限失败", g.Map{
+				"destPath": destPath,
+				"error":    err,
+			})
+		}
+	}
+
+	g.Log().Info(ctx, "算法文件解压完成", g.Map{
+		"zipPath":    zipPath,
+		"targetDir":  targetDir,
+		"fileCount":  len(reader.File),
+	})
+
+	return nil
 }
