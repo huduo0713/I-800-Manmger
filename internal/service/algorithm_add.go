@@ -413,9 +413,9 @@ func (s *AlgorithmDownloadService) extractAlgorithmFile(zipPath, targetDir strin
 	}
 
 	g.Log().Info(ctx, "算法文件解压完成", g.Map{
-		"zipPath":    zipPath,
-		"targetDir":  targetDir,
-		"fileCount":  len(reader.File),
+		"zipPath":   zipPath,
+		"targetDir": targetDir,
+		"fileCount": len(reader.File),
 	})
 
 	return nil
