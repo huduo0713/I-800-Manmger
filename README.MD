@@ -454,9 +454,9 @@ go run .
 | 1002 | MD5校验失败 | 下载文件MD5与请求不符 | 确认源文件完整性、重新计算MD5值、检查传输过程 | ❌ 文件校验阶段 |
 | 1003 | 文件系统错误 | 磁盘空间不足/目录权限不够/路径创建失败 | 检查磁盘空间、目录读写权限、路径格式 | ❌ 文件系统操作 |
 | 1004 | 数据库错误 | SQLite连接失败/SQL执行异常/表结构问题 | 检查数据库文件权限、表结构、SQL语法 | ❌ 数据库同步阶段 |
-| 1005 | 参数错误 | algorithmId/algorithmDataUrl/md5缺失 | 检查MQTT消息格式和必要参数完整性 | ❌ 参数验证阶段 |
-| 1006 | 算法不存在 | 删除不存在的算法ID | 检查算法ID是否正确、是否已被删除 | ❌ 算法删除阶段 |
-| 🆕 1007 | ZIP解压失败 | 压缩文件格式错误/解压权限不足/磁盘空间不足 | 检查ZIP文件完整性、解压目录权限、磁盘空间 | ❌ 文件解压阶段 |
+| 1005 | 参数错误 | algorithmId/algorithmDataUrl/md5缺失/runStatus无效 | 检查MQTT消息格式和必要参数完整性 | ❌ 参数验证阶段 |
+| 1006 | 算法不存在 | 删除/配置不存在的算法ID | 检查算法ID是否正确、是否已被删除 | ❌ 算法删除/配置阶段 |
+| 🆕 1007 | 版本已存在/ZIP解压失败 | 算法版本重复下发/压缩文件格式错误/解压权限不足 | **版本冲突**: 忽略重复下发。**解压错误**: 检查ZIP文件完整性、解压目录权限、磁盘空间 | ❌ 版本检查/文件解压阶段 |
 
 ### 🔄 错误处理流程（增强版）
 
@@ -482,6 +482,123 @@ MD5校验 (错误码1002) ❌→ 删除文件 + 清理空目录
 📝 滚动日志记录 (所有操作持久化记录)
     ↓
 响应发送 (错误码0-成功)
+
+## 🔄 版本管理重要修复 【v2.1.0关键改进】
+
+### 🐛 关键Bug修复
+
+#### 1. JSON兼容性问题修复 🔧
+**问题**: 客户端发送整数fileSize时，Go结构体int64字段解析失败导致程序卡死
+```go
+// ❌ 修复前：兼容性问题
+type AlgorithmAddRequest struct {
+    FileSize int64 `json:"fileSize"`    // 无法解析客户端的浮点数JSON
+}
+
+// ✅ 修复后：全面兼容
+type AlgorithmAddRequest struct {
+    FileSize float64 `json:"fileSize"`  // 兼容整数和浮点数JSON
+}
+
+// 安全转换使用
+func processRequest(req *AlgorithmAddRequest) {
+    fileSize := int64(req.FileSize)  // 安全转换为int64使用
+}
+```
+
+#### 2. 版本冲突处理优化 ⚠️
+**问题**: 算法版本已存在时返回"添加成功"误导用户
+```go
+// 新增专用错误类型
+type AlgorithmVersionExistsError struct {
+    AlgorithmId string
+    Version     string
+}
+
+func (e AlgorithmVersionExistsError) Error() string {
+    return fmt.Sprintf("算法版本已存在: %s-%s", e.AlgorithmId, e.Version)
+}
+```
+
+**改进效果**:
+- ✅ 版本重复时明确返回错误码 `1007`
+- ✅ 错误信息包含具体的algorithmId和version
+- ✅ 客户端可根据错误码判断是否为版本冲突
+
+#### 3. 版本更新文件删除Bug修复 🚨
+**问题**: 下发新版本时，删除旧版本逻辑错误地将刚下载的新文件也删除
+```go
+// ❌ 修复前：严重Bug
+if oldVersionId != "" {
+    gfile.Remove(algorithmDir)  // 错误地删除了新文件
+}
+
+// ✅ 修复后：精确删除
+if oldVersionId != "" && oldVersionId != req.AlgorithmVersionId {
+    oldDir := gfile.Join(baseAlgorithmDir, req.AlgorithmId, oldVersionId)
+    if gfile.Exists(oldDir) {
+        gfile.Remove(oldDir)  // 只删除真正的旧版本目录
+        g.Log().Infof(ctx, "已删除旧版本目录: %s", oldDir)
+    }
+}
+```
+
+### 📊 优化后的版本管理流程
+
+```
+算法下发请求 → algorithm.add
+    ↓
+🔍 数据库版本存在性检查
+    ↓
+❓ (algorithmId + algorithmVersion) 是否已存在？
+    ├── ✅ 存在 → 返回错误码1007 + 明确错误信息 ❌
+    └── ❌ 不存在 ↓
+📥 HTTP下载文件 (fileSize支持float64格式)
+    ↓
+✅ MD5文件完整性校验
+    ↓
+📂 ZIP解压到新版本目录
+    ↓
+🗑️ 智能清理旧版本 (仅在新版本成功部署后执行)
+    ↓
+💾 数据库记录更新
+    ↓
+✅ 返回成功响应
+```
+
+### 🧪 修复验证测试
+
+**测试1: JSON兼容性**
+```json
+{
+  "params": {
+    "fileSize": 1048576    // 整数格式 ✅ 现在可正常解析
+  }
+}
+```
+
+**测试2: 版本冲突处理**
+```json
+// 重复版本请求
+{
+  "params": {
+    "algorithmId": "algo-001",
+    "algorithmVersion": "v1.0.0"  // 已存在版本
+  }
+}
+
+// 期望响应
+{
+  "code": 1007,
+  "message": "算法版本已存在: algo-001-v1.0.0",
+  "data": null
+}
+```
+
+**测试3: 版本更新文件保护**
+- 下发 `algo-001 v2.0.0` (新版本)
+- 验证 `v1.0.0` 目录被删除 ✅
+- 验证 `v2.0.0` 目录保留完整 ✅
 
 简化：
 📥 MQTT算法下发请求
@@ -761,6 +878,222 @@ MQTT消息接收 → algorithm.delete
 | 文件删除失败 | 1003 | 删除算法目录失败 | 检查文件权限 |
 | 数据库操作失败 | 1004 | 删除算法数据库记录失败 | 检查数据库连接 |
 
+## 🔍 算法查询功能 (algorithm.show) 【新增 v2.1.0】
+
+### 📋 查询流程架构
+
+```
+MQTT消息接收 → algorithm.show
+    ↓
+数据库查询所有算法记录 (DAO层)
+    ↓
+遍历算法记录，读取每个config.yaml
+    ↓
+解析 algo.runStatus 运行状态 (1-运行, 0-停止)
+    ↓
+构建算法列表响应数据
+    ↓
+发送MQTT响应 (包含运行状态)
+```
+
+### 🎯 核心特性
+
+- **🔍 状态实时读取**: 从算法目录下的 `config.yaml` 读取实时运行状态
+- **📊 完整信息**: 返回算法名称、ID、版本、运行状态
+- **⚡ 零参数查询**: 无需传入参数，自动查询所有算法
+- **🛡️ 异常容错**: 配置文件不存在时默认返回停止状态
+
+### 🧪 查询功能测试
+
+**发送algorithm.show请求**:
+- **主题**: `/sys/i800/edge-device-001/request`
+- **消息**:
+```json
+{
+  "cmdId": "show-test-001",
+  "version": "1.0",
+  "method": "algorithm.show",
+  "timestamp": "2025-09-18 15:30:00",
+  "params": null
+}
+```
+
+**期望响应**:
+```json
+{
+  "cmdId": "show-test-001",
+  "version": "1.0", 
+  "method": "algorithm.show",
+  "timestamp": "2025-09-18 15:30:01",
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "algorithmName": "夜间节能策略算法",
+      "algorithmId": "algo-power-save-001",
+      "algorithmVersion": "v1.2.0",
+      "runStatus": 1
+    },
+    {
+      "algorithmName": "智能调度算法", 
+      "algorithmId": "algo-schedule-002",
+      "algorithmVersion": "v2.1.0",
+      "runStatus": 0
+    }
+  ]
+}
+```
+
+### 📁 配置文件结构
+
+算法运行状态从以下位置读取：
+```yaml
+# 路径: /usr/runtime/algorithm/{algorithmId}/{algorithmVersionId}/config.yaml
+algo:
+  runStatus: 1    # 1表示开启，0表示关闭
+  name: "算法名称"
+  version: "1.0.0"
+  # 其他配置...
+```
+
+### ⚠️ 查询错误场景
+
+| 场景 | 错误码 | 错误信息 | 处理方法 |
+|------|--------|----------|----------|
+| 数据库查询失败 | 1004 | 查询算法列表失败 | 检查数据库连接和表结构 |
+| 配置文件格式错误 | - | 记录警告，默认runStatus=0 | 检查YAML格式 |
+| 配置文件不存在 | - | 记录警告，默认runStatus=0 | 算法部署不完整 |
+
+## ⚙️ 算法启停功能 (algorithm.config) 【新增 v2.1.0】
+
+### 📋 启停流程架构
+
+```
+MQTT消息接收 → algorithm.config  
+    ↓
+参数验证 (algorithmId + runStatus)
+    ↓
+数据库存在性检查 (验证算法是否存在)
+    ↓
+读取原config.yaml配置文件
+    ↓
+更新 algo.runStatus 为新值
+    ↓
+写入更新后的config.yaml
+    ↓
+发送MQTT响应
+```
+
+### 🎯 核心特性
+
+- **🎛️ 远程控制**: 通过MQTT消息控制算法启停
+- **✅ 存在性校验**: 启停前验证算法是否在数据库中存在
+- **📁 配置持久化**: 直接修改算法目录下的 `config.yaml` 文件
+- **🔄 状态同步**: 设备根据配置文件实时调整算法运行状态
+- **🛡️ 参数验证**: 严格校验 runStatus 只能是 0 或 1
+
+### 🧪 启停功能测试
+
+**发送algorithm.config请求**:
+- **主题**: `/sys/i800/edge-device-001/request`
+- **消息格式**:
+```json
+{
+  "cmdId": "config-test-001",
+  "version": "1.0",
+  "method": "algorithm.config", 
+  "timestamp": "2025-09-18 16:00:00",
+  "params": {
+    "algorithmId": "algo-power-save-001",
+    "runStatus": 0
+  }
+}
+```
+
+**成功响应**:
+```json
+{
+  "cmdId": "config-test-001",
+  "version": "1.0",
+  "method": "algorithm.config",
+  "timestamp": "2025-09-18 16:00:01", 
+  "code": 0,
+  "message": "success",
+  "data": null
+}
+```
+
+### 📝 配置文件更新示例
+
+**更新前的config.yaml**:
+```yaml
+algo:
+  runStatus: 1    # 运行中
+  name: "夜间节能策略算法"
+  version: "v1.2.0"
+```
+
+**更新后的config.yaml**:
+```yaml
+algo:
+  runStatus: 0    # 已停止
+  name: "夜间节能策略算法" 
+  version: "v1.2.0"
+```
+
+### ⚠️ 启停错误场景
+
+| 场景 | 错误码 | 错误信息 | 处理方法 |
+|------|--------|----------|----------|
+| algorithmId为空 | 1005 | 算法ID不能为空 | 检查请求参数 |
+| runStatus无效 | 1005 | 运行状态值无效，只能是0(关闭)或1(开启) | 使用0或1 |
+| 算法不存在 | 1006 | 算法不存在，algorithmId: xxx | 先下发算法 |
+| 配置文件不存在 | 1006 | 配置文件不存在: /path/to/config.yaml | 算法部署不完整 |
+| 文件读写失败 | 1003 | 读取/写入配置文件失败 | 检查文件权限 |
+
+### 🔄 启停与查询联动测试
+
+1. **查询当前状态**: 发送 `algorithm.show` 查看所有算法状态
+2. **执行启停操作**: 发送 `algorithm.config` 修改特定算法状态
+3. **验证状态变更**: 再次发送 `algorithm.show` 确认状态已更新
+4. **文件系统验证**: 检查对应的 `config.yaml` 文件内容已修改
+
+## 📊 新增服务架构说明 【v2.1.0】
+
+### 📁 新增服务文件
+
+```
+internal/service/
+├── algorithm_common.go         # 🔧 公共组件 (扩展)
+│   ├── AlgorithmShowRequest    # 🆕 查询请求结构
+│   ├── AlgorithmConfigRequest  # 🆕 启停请求结构
+│   ├── AlgorithmShowResponseData # 🆕 查询响应数据
+│   ├── AlgorithmConfig         # 🆕 config.yaml解析结构
+│   ├── AlgorithmVersionExistsError # 🆕 版本已存在错误类型
+│   └── CodeVersionExists = 1007 # 🆕 新增错误码
+│
+├── algorithm_show.go           # 🆕 算法查询服务
+│   ├── AlgorithmShowService    # 查询服务类
+│   ├── GetAlgorithmList()      # 获取算法列表及运行状态 
+│   ├── readAlgorithmRunStatus() # 读取算法运行状态
+│   ├── parseConfigFile()       # 解析config.yaml文件
+│   └── buildConfigPath()       # 构建配置文件路径
+│
+└── algorithm_config.go         # 🆕 算法启停服务
+    ├── AlgorithmConfigService  # 启停服务类
+    ├── UpdateAlgorithmRunStatus() # 更新算法运行状态
+    ├── queryAlgorithmFromDB()  # 数据库存在性查询
+    ├── updateConfigFile()      # 更新配置文件
+    └── buildConfigPath()       # 构建配置文件路径
+```
+
+### 🎯 设计原则
+
+- **📦 模块化**: 每个MQTT方法对应独立的服务文件
+- **🔄 可复用**: 配置文件路径构建等公共逻辑抽象复用
+- **🛡️ 容错性**: 配置文件不存在时提供默认值和友好错误处理
+- **📝 日志记录**: 所有操作详细记录，便于调试和监控
+
 ### 🏗️ 内部业务逻辑层 (`internal/`)
 
 #### 🚀 命令行启动层 (`internal/cmd/`)
@@ -892,13 +1225,49 @@ logger:
 
 ---
 
-## 🎯 后续规划
+## 📋 版本更新日志
 
-- 🔄 **算法热更新**: 支持运行时算法版本切换
-- 📊 **性能监控**: 添加算法执行性能统计
-- 🌐 **集群支持**: 支持多节点算法同步
-- 🔐 **安全增强**: 添加算法文件数字签名验证
-- 📱 **管理界面**: Web端算法管理控制台
+### � v2.1.0 (2025-01-20) - 算法管理功能大幅增强
+
+#### 🆕 新增功能
+- **🔍 算法查询功能** (`algorithm.show`): 完整的算法列表查询，支持实时运行状态读取
+- **⚙️ 算法启停控制** (`algorithm.config`): 远程控制算法启动/停止状态，支持配置文件持久化
+- **� 配置文件管理**: 自动解析和修改算法目录下的 `config.yaml` 文件
+- **🎯 智能路径处理**: 跨平台配置文件路径构建，Windows/Linux环境兼容
+
+#### 🔧 重要Bug修复
+- **JSON兼容性修复**: `fileSize` 字段从 `int64` 改为 `float64`，解决客户端JSON解析兼容性问题
+- **版本冲突处理**: 新增 `AlgorithmVersionExistsError` 错误类型，版本重复时返回明确错误信息 (错误码1007)
+- **版本更新Bug修复**: 修复版本更新时新下载文件被意外删除的严重bug
+- **错误响应完善**: 所有MQTT方法添加完整错误响应机制，防止客户端卡死
+
+#### 🎨 架构优化
+- **服务模块化**: 新增 `algorithm_show.go` 和 `algorithm_config.go` 独立服务模块
+- **公共组件扩展**: `algorithm_common.go` 增加查询和配置相关数据结构
+- **错误处理增强**: 完善的异常捕获和友好错误提示机制
+- **日志记录改进**: 详细的操作日志和错误追踪
+
+#### 🧪 测试覆盖
+- **功能测试**: algorithm.show 查询功能完整测试用例
+- **启停测试**: algorithm.config 启动/停止状态控制验证
+- **异常测试**: 配置文件不存在、格式错误等边界情况处理
+- **集成测试**: MQTT消息收发和状态同步验证
+
+---
+
+### � v2.0.0 (2025-01-15) - 核心架构重构
+
+#### 🆕 新增功能
+- **📦 算法下发功能** (`algorithm.add`): HTTP/FTP多协议下载，MD5校验，ZIP自动解压
+- **🗑️ 算法删除功能** (`algorithm.delete`): 数据库清理和文件系统清理
+- **🔄 版本管理机制**: 基于 `algorithmId + algorithmVersion` 的复合唯一约束
+- **� 滚动日志系统**: 20MB自动轮转，压缩存储，30天自动清理
+
+#### 🏗️ 架构特性
+- **GoFrame v2.9.3**: 现代化Go Web框架，强大的ORM和中间件支持
+- **SQLite3数据库**: 轻量级嵌入式数据库，复合唯一约束和CHECK约束
+- **MQTT Eclipse Paho v1.5.0**: 稳定的MQTT客户端，支持自动重连
+- **跨平台部署**: Windows开发环境和Linux生产环境完全兼容
 
 ---
 

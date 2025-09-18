@@ -218,6 +218,17 @@ func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
 				"error":   err,
 				"payload": string(msg.Payload()),
 			})
+			// 发送错误响应给客户端，避免客户端一直等待
+			reply := AlgorithmReply{
+				CmdId:     baseRequest.CmdId,
+				Version:   baseRequest.Version,
+				Method:    baseRequest.Method,
+				Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+				Code:      CodeInvalidParams,
+				Message:   "JSON解析失败: " + err.Error(),
+				Data:      nil,
+			}
+			s.sendAlgorithmReply(&reply, deviceId)
 			return
 		}
 		s.handleAlgorithmAdd(&request, deviceId)
@@ -228,26 +239,59 @@ func (s *sMqtt) handleAlgorithmMessage(msg mqtt.Message, deviceId string) {
 				"error":   err,
 				"payload": string(msg.Payload()),
 			})
+			// 发送错误响应给客户端
+			reply := AlgorithmReply{
+				CmdId:     baseRequest.CmdId,
+				Version:   baseRequest.Version,
+				Method:    baseRequest.Method,
+				Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+				Code:      CodeInvalidParams,
+				Message:   "JSON解析失败: " + err.Error(),
+				Data:      nil,
+			}
+			s.sendAlgorithmReply(&reply, deviceId)
 			return
 		}
 		s.handleAlgorithmDelete(&request, deviceId)
 	case "algorithm.show":
-		var request AlgorithmAddRequest
+		var request AlgorithmShowRequest
 		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
 			g.Log().Error(ctx, "解析algorithm.show消息失败", g.Map{
 				"error":   err,
 				"payload": string(msg.Payload()),
 			})
+			// 发送错误响应给客户端
+			reply := AlgorithmReply{
+				CmdId:     baseRequest.CmdId,
+				Version:   baseRequest.Version,
+				Method:    baseRequest.Method,
+				Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+				Code:      CodeInvalidParams,
+				Message:   "JSON解析失败: " + err.Error(),
+				Data:      nil,
+			}
+			s.sendAlgorithmReply(&reply, deviceId)
 			return
 		}
 		s.handleAlgorithmShow(&request, deviceId)
 	case "algorithm.config":
-		var request AlgorithmAddRequest
+		var request AlgorithmConfigRequest
 		if err := json.Unmarshal(msg.Payload(), &request); err != nil {
 			g.Log().Error(ctx, "解析algorithm.config消息失败", g.Map{
 				"error":   err,
 				"payload": string(msg.Payload()),
 			})
+			// 发送错误响应给客户端
+			reply := AlgorithmReply{
+				CmdId:     baseRequest.CmdId,
+				Version:   baseRequest.Version,
+				Method:    baseRequest.Method,
+				Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+				Code:      CodeInvalidParams,
+				Message:   "JSON解析失败: " + err.Error(),
+				Data:      nil,
+			}
+			s.sendAlgorithmReply(&reply, deviceId)
 			return
 		}
 		s.handleAlgorithmConfig(&request, deviceId)
@@ -311,14 +355,31 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 	// 同步到数据库
 	err = downloadService.SyncAlgorithmToDatabase(req, localPath)
 	if err != nil {
-		g.Log().Error(ctx, "同步算法到数据库失败", g.Map{
-			"error":       err,
-			"algorithmId": req.Params.AlgorithmId,
-			"localPath":   localPath,
-		})
-
-		reply.Code = CodeDatabaseError
-		reply.Message = err.Error()
+		// 检查是否是版本已存在错误
+		if versionExistsErr, ok := err.(*AlgorithmVersionExistsError); ok {
+			// 版本已存在，返回特定信息
+			reply.Code = CodeVersionExists
+			reply.Message = "算法版本已存在，忽略本次下发"
+			reply.Data = map[string]interface{}{
+				"algorithmId": versionExistsErr.AlgorithmId,
+				"version":     versionExistsErr.Version,
+				"localPath":   versionExistsErr.LocalPath,
+				"status":      "ignored",
+			}
+			g.Log().Info(ctx, "算法版本已存在，返回忽略响应", g.Map{
+				"algorithmId": versionExistsErr.AlgorithmId,
+				"version":     versionExistsErr.Version,
+			})
+		} else {
+			// 其他数据库错误
+			g.Log().Error(ctx, "同步算法到数据库失败", g.Map{
+				"error":       err,
+				"algorithmId": req.Params.AlgorithmId,
+				"localPath":   localPath,
+			})
+			reply.Code = CodeDatabaseError
+			reply.Message = err.Error()
+		}
 		s.sendAlgorithmReply(&reply, deviceId)
 		return
 	}
@@ -405,29 +466,90 @@ func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmDeleteRequest, deviceId stri
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 
-// handleAlgorithmShow 处理算法展示请求 (占位符实现)
-func (s *sMqtt) handleAlgorithmShow(req *AlgorithmAddRequest, deviceId string) {
+// handleAlgorithmShow 处理算法展示请求
+func (s *sMqtt) handleAlgorithmShow(req *AlgorithmShowRequest, deviceId string) {
+	ctx := gctx.New()
+
+	// 创建响应结构
 	reply := AlgorithmReply{
 		CmdId:     req.CmdId,
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
-		Code:      CodeSuccess,
-		Message:   "algorithm.show 功能待实现",
 	}
+
+	// 使用算法查询服务获取算法列表
+	showService := NewAlgorithmShowService()
+	algorithmList, err := showService.GetAlgorithmList(ctx)
+	if err != nil {
+		reply.Code = CodeDatabaseError
+		reply.Message = "查询算法列表失败"
+		g.Log().Error(ctx, "algorithm.show处理失败", g.Map{
+			"deviceId": deviceId,
+			"error":    err,
+		})
+	} else {
+		reply.Code = CodeSuccess
+		reply.Message = "success"
+		reply.Data = algorithmList
+		g.Log().Info(ctx, "algorithm.show处理成功", g.Map{
+			"deviceId": deviceId,
+			"count":    len(algorithmList),
+		})
+	}
+
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 
-// handleAlgorithmConfig 处理算法配置请求 (占位符实现)
-func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmAddRequest, deviceId string) {
+// handleAlgorithmConfig 处理算法配置请求
+func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmConfigRequest, deviceId string) {
+	ctx := gctx.New()
+
+	// 创建响应结构
 	reply := AlgorithmReply{
 		CmdId:     req.CmdId,
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
-		Code:      CodeSuccess,
-		Message:   "algorithm.config 功能待实现",
 	}
+
+	// 参数验证
+	if req.Params.AlgorithmId == "" {
+		reply.Code = CodeInvalidParams
+		reply.Message = "算法ID不能为空"
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	if req.Params.RunStatus != 0 && req.Params.RunStatus != 1 {
+		reply.Code = CodeInvalidParams
+		reply.Message = "运行状态值无效，只能是0(关闭)或1(开启)"
+		s.sendAlgorithmReply(&reply, deviceId)
+		return
+	}
+
+	// 使用算法配置服务更新运行状态
+	configService := NewAlgorithmConfigService()
+	err := configService.UpdateAlgorithmRunStatus(ctx, req.Params.AlgorithmId, req.Params.RunStatus)
+	if err != nil {
+		reply.Code = CodeAlgorithmNotFound
+		reply.Message = err.Error()
+		g.Log().Error(ctx, "algorithm.config处理失败", g.Map{
+			"deviceId":    deviceId,
+			"algorithmId": req.Params.AlgorithmId,
+			"runStatus":   req.Params.RunStatus,
+			"error":       err,
+		})
+	} else {
+		reply.Code = CodeSuccess
+		reply.Message = "success"
+		g.Log().Info(ctx, "algorithm.config处理成功", g.Map{
+			"deviceId":    deviceId,
+			"algorithmId": req.Params.AlgorithmId,
+			"runStatus":   req.Params.RunStatus,
+		})
+	}
+
 	s.sendAlgorithmReply(&reply, deviceId)
 }
 

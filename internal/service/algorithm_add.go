@@ -163,14 +163,18 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 		return fmt.Errorf("查询算法版本失败: %v", err)
 	}
 
-	// 如果相同版本已存在，忽略此次下发
+	// 如果相同版本已存在，返回版本已存在错误
 	if !existingVersion.IsEmpty() {
 		g.Log().Info(ctx, "算法版本已存在，忽略下发", g.Map{
 			"algorithmId": req.Params.AlgorithmId,
 			"version":     req.Params.AlgorithmVersion,
 			"localPath":   existingVersion["local_path"].String(),
 		})
-		return nil
+		return &AlgorithmVersionExistsError{
+			AlgorithmId: req.Params.AlgorithmId,
+			Version:     req.Params.AlgorithmVersion,
+			LocalPath:   existingVersion["local_path"].String(),
+		}
 	}
 
 	// 查询该算法ID的所有旧版本
@@ -188,7 +192,7 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 		AlgorithmVersion:   req.Params.AlgorithmVersion,
 		AlgorithmVersionId: req.Params.AlgorithmVersionId,
 		AlgorithmDataUrl:   req.Params.AlgorithmDataUrl,
-		FileSize:           req.Params.FileSize,
+		FileSize:           int(req.Params.FileSize), // 将float64转换为int
 		Md5:                req.Params.Md5,
 		LocalPath:          localPath,
 	}
@@ -216,16 +220,16 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 
 		// 清理旧版本文件
 		if oldLocalPath != "" {
-			// 清理旧算法的整个algorithmId目录（因为版本改变了）
-			oldAlgorithmDir := filepath.Join(s.downloadPath, req.Params.AlgorithmId)
-			if err := os.RemoveAll(oldAlgorithmDir); err != nil {
-				g.Log().Warning(ctx, "删除旧版本算法目录失败", g.Map{
-					"oldAlgorithmDir": oldAlgorithmDir,
-					"error":           err,
+			// 只删除旧的版本目录，而不是整个algorithmId目录
+			// 因为新版本可能已经下载到同一个algorithmId下的不同版本目录了
+			if err := os.RemoveAll(oldLocalPath); err != nil {
+				g.Log().Warning(ctx, "删除旧版本目录失败", g.Map{
+					"oldLocalPath": oldLocalPath,
+					"error":        err,
 				})
 			} else {
-				g.Log().Info(ctx, "清理旧版本算法目录成功", g.Map{
-					"oldAlgorithmDir": oldAlgorithmDir,
+				g.Log().Info(ctx, "清理旧版本目录成功", g.Map{
+					"oldLocalPath": oldLocalPath,
 				})
 			}
 		}
