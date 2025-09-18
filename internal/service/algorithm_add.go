@@ -154,10 +154,31 @@ func (s *AlgorithmDownloadService) DownloadAlgorithmFile(algorithmId, algorithmV
 func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequest, localPath string) error {
 	ctx := gctx.New()
 
-	// 检查是否已存在相同版本的算法
-	existing, err := dao.Algorithm.Ctx(ctx).Where(dao.Algorithm.Columns().AlgorithmId, req.Params.AlgorithmId).One()
+	// 检查是否已存在相同版本的算法（基于algorithmId + algorithmVersion）
+	existingVersion, err := dao.Algorithm.Ctx(ctx).
+		Where(dao.Algorithm.Columns().AlgorithmId, req.Params.AlgorithmId).
+		Where(dao.Algorithm.Columns().AlgorithmVersion, req.Params.AlgorithmVersion).
+		One()
 	if err != nil {
-		return fmt.Errorf("查询数据库失败: %v", err)
+		return fmt.Errorf("查询算法版本失败: %v", err)
+	}
+
+	// 如果相同版本已存在，忽略此次下发
+	if !existingVersion.IsEmpty() {
+		g.Log().Info(ctx, "算法版本已存在，忽略下发", g.Map{
+			"algorithmId": req.Params.AlgorithmId,
+			"version":     req.Params.AlgorithmVersion,
+			"localPath":   existingVersion["local_path"].String(),
+		})
+		return nil
+	}
+
+	// 查询该算法ID的所有旧版本
+	existingAlgorithm, err := dao.Algorithm.Ctx(ctx).
+		Where(dao.Algorithm.Columns().AlgorithmId, req.Params.AlgorithmId).
+		One()
+	if err != nil {
+		return fmt.Errorf("查询旧版本算法失败: %v", err)
 	}
 
 	// 准备数据对象
@@ -172,61 +193,55 @@ func (s *AlgorithmDownloadService) SyncAlgorithmToDatabase(req *AlgorithmAddRequ
 		LocalPath:          localPath,
 	}
 
-	if existing.IsEmpty() {
-		// 新增算法记录
+	// 如果是全新的算法ID，直接插入
+	if existingAlgorithm.IsEmpty() {
 		_, err = dao.Algorithm.Ctx(ctx).Data(algorithmData).Insert()
 		if err != nil {
-			return fmt.Errorf("插入算法记录失败: %v", err)
+			return fmt.Errorf("插入新算法记录失败: %v", err)
 		}
 		g.Log().Info(ctx, "新增算法记录成功", g.Map{
 			"algorithmId": req.Params.AlgorithmId,
 			"version":     req.Params.AlgorithmVersion,
 		})
 	} else {
-		// 算法已存在，进行覆盖更新
-		existingVersion := existing["algorithm_version"].String()
-		oldLocalPath := existing["local_path"].String()
+		// 算法ID已存在，但版本不同 - 需要删除旧版本，安装新版本
+		oldVersion := existingAlgorithm["algorithm_version"].String()
+		oldLocalPath := existingAlgorithm["local_path"].String()
 
-		// 无论版本是否相同，都要清理旧文件（实现真正的覆盖）
-		if oldLocalPath != "" && oldLocalPath != localPath {
-			// 清理旧算法的整个目录
-			oldDir := filepath.Dir(filepath.Dir(oldLocalPath)) // 获取 algorithmId 级别的目录
-			if err := os.RemoveAll(oldDir); err != nil {
-				g.Log().Warning(ctx, "删除旧算法目录失败", g.Map{
-					"oldDir": oldDir,
-					"error":  err,
+		g.Log().Info(ctx, "检测到算法版本更新", g.Map{
+			"algorithmId": req.Params.AlgorithmId,
+			"oldVersion":  oldVersion,
+			"newVersion":  req.Params.AlgorithmVersion,
+		})
+
+		// 清理旧版本文件
+		if oldLocalPath != "" {
+			// 清理旧算法的整个algorithmId目录（因为版本改变了）
+			oldAlgorithmDir := filepath.Join(s.downloadPath, req.Params.AlgorithmId)
+			if err := os.RemoveAll(oldAlgorithmDir); err != nil {
+				g.Log().Warning(ctx, "删除旧版本算法目录失败", g.Map{
+					"oldAlgorithmDir": oldAlgorithmDir,
+					"error":           err,
 				})
 			} else {
-				g.Log().Info(ctx, "清理旧算法目录成功", g.Map{
-					"oldDir": oldDir,
+				g.Log().Info(ctx, "清理旧版本算法目录成功", g.Map{
+					"oldAlgorithmDir": oldAlgorithmDir,
 				})
 			}
 		}
 
-		if req.Params.AlgorithmVersion != existingVersion {
-			g.Log().Info(ctx, "检测到算法版本变更", g.Map{
-				"algorithmId":     req.Params.AlgorithmId,
-				"existingVersion": existingVersion,
-				"newVersion":      req.Params.AlgorithmVersion,
-			})
-		} else {
-			g.Log().Info(ctx, "覆盖相同版本算法", g.Map{
-				"algorithmId": req.Params.AlgorithmId,
-				"version":     req.Params.AlgorithmVersion,
-			})
-		}
-
-		// 更新记录
+		// 更新为新版本记录
 		_, err = dao.Algorithm.Ctx(ctx).
 			Where(dao.Algorithm.Columns().AlgorithmId, req.Params.AlgorithmId).
 			Data(algorithmData).
 			Update()
 		if err != nil {
-			return fmt.Errorf("更新算法记录失败: %v", err)
+			return fmt.Errorf("更新算法版本记录失败: %v", err)
 		}
-		g.Log().Info(ctx, "算法覆盖更新成功", g.Map{
+		g.Log().Info(ctx, "算法版本更新成功", g.Map{
 			"algorithmId": req.Params.AlgorithmId,
-			"version":     req.Params.AlgorithmVersion,
+			"oldVersion":  oldVersion,
+			"newVersion":  req.Params.AlgorithmVersion,
 		})
 	}
 

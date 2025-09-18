@@ -1,51 +1,17 @@
 # I-800 边缘设备算法管理系统
 
-> 基于 **GoFrame v2.### 💼 核心业务层
-```
-internal/
-├── service/              ⭐ 业务逻辑层
-│   ├── mqtt.go              # MQTT通信服务
-│   ├── algorithm_common.go  # 算法通用数据结构和错误码
-│   ├── algorithm_add.go     # 算法添加/下发核心逻辑
-│   └── algorithm_delete.go  # 算法删除核心逻辑
-├── controller/          📡 HTTP API控制器
-│   ├── algorithm/       # 算法管理API
-│   └── user/           # 用户管理API
-├── dao/                💾 数据访问层 (自动生成)
-├── model/              📋 数据模型层
-│   ├── entity/         # 数据库表实体缘设备算法管理系统，支持 MQTT 协议的云端算法下发、文件管理和数据同步功能。
+> 基于 **GoFrame v2.9.3** 构建的边缘设备算法管理系统，支持 MQTT 协议的云端算法下发、文件管理、自动解压和数据同步功能。
 
-# 详细版
-internal/service/
-├── algorithm_common.go     # 🔧 公共组件
-│   ├── AlgorithmAddRequest
-│   ├── AlgorithmDeleteRequest  
-│   ├── AlgorithmReply
-│   └── 错误码常量 (CodeSuccess, CodeDownloadFailed等)
-│
-├── algorithm_add.go        # ⬇️ 算法添加服务
-│   ├── AlgorithmDownloadService
-│   ├── DownloadAlgorithmFile()
-│   ├── SyncAlgorithmToDatabase()
-│   └── cleanupDirectoryOnFailure()
-│
-├── algorithm_delete.go     # 🗑️ 算法删除服务
-│   ├── AlgorithmDeleteService
-│   ├── CheckAlgorithmExists()
-│   ├── DeleteAlgorithmFiles()
-│   ├── DeleteAlgorithmFromDatabase()
-│   └── DeleteAlgorithm()
-│
-└── mqtt.go                # 📡 MQTT通信服务
-    ├── handleAlgorithmAdd() → NewAlgorithmDownloadService()
-    └── handleAlgorithmDeleteCorrect() → NewAlgorithmDeleteService()
+## ⭐ 核心功能
 
-🎯 架构优势
-- 🧩 单一职责 - 每个文件专注特定功能
-- 🔄 易于扩展 - 添加新算法操作只需新增文件
-- 🛠️ 便于维护 - 修改特定功能不影响其他模块
-- 📦 代码复用 - 公共组件统一管理，避免重复
-- 🧪 便于测试 - 每个服务可以独立进行单元测试
+- 🔗 **MQTT算法下发**: 支持云端通过MQTT协议下发算法文件
+- 📁 **智能文件管理**: 自动下载、MD5校验、版本管理、ZIP自动解压
+- 🗃️ **数据同步**: SQLite数据库存储算法信息，复合唯一约束
+- 🔄 **跨平台支持**: Windows开发、Linux部署自适应
+- 📊 **完整API**: HTTP RESTful API (用户管理、算法查询)
+- 🎯 **版本控制**: 基于算法ID+版本的智能去重机制
+- 📝 **滚动日志**: 20MB文件滚动、自动压缩、持久化存储
+- 🛡️ **复合校验**: MD5完整性 + 版本唯一性 + 数据库约束 + 文件结构校验
 
 ## 🚀 快速开始
 
@@ -57,20 +23,14 @@ go run .
 http://127.0.0.1:8000/swagger/
 ```
 
-## ⭐ 核心功能
-
-- 🔗 **MQTT算法下发**: 支持云端通过MQTT协议下发算法文件
-- 📁 **文件管理**: 自动下载、MD5校验、版本管理
-- 🗃️ **数据同步**: SQLite数据库存储算法信息
-- 🔄 **跨平台支持**: Windows开发、Linux部署自适应
-- 📊 **完整API**: HTTP RESTful API (用户管理、算法查询)
-
 ## 🏗️ 系统架构
 
 ### 技术栈
 - **框架**: GoFrame v2.9.3
-- **数据库**: SQLite3 (嵌入式)
-- **通信协议**: MQTT + HTTP
+- **数据库**: SQLite3 (嵌入式) - 增强约束和触发器
+- **通信协议**: MQTT (Eclipse Paho v1.5.0) + HTTP
+- **文件处理**: 自动ZIP解压、MD5实时校验
+- **日志系统**: 滚动文件存储、自动压缩清理
 - **部署**: Docker + Kubernetes
 
 ### 分层架构
@@ -79,25 +39,110 @@ MQTT协议层 → Service业务层 → DAO数据层 → SQLite数据库
 HTTP API层 → Controller控制层 → Service业务层 ↗
 ```
 
+### 🔄 复合校验机制
+
+```
+📥 MQTT算法下发请求
+    ↓
+🔍 版本存在性检查（基于algorithmId + algorithmVersion）
+    ↓
+📥 HTTP文件下载（流式处理 + 实时MD5计算）
+    ↓
+🔐 MD5完整性验证（与预期值对比）
+    ↓
+📦 ZIP文件自动解压（提取动态库和配置文件）
+    ↓
+💾 数据库记录存储（复合唯一约束保护）
+    ↓
+🏠 版本化目录结构（algorithm/{algorithmId}/{algorithmVersionId}/）
+    ↓
+📝 操作日志记录（滚动文件持久化）
+    ↓
+🎉 算法部署就绪
+```
+
 ## 📁 项目结构详解
 
-### � 核心业务层
+### 💼 核心业务层
 ```
 internal/
 ├── service/              ⭐ 业务逻辑层
-│   ├── mqtt.go          # MQTT通信服务
-│   └── algorithm_add.go # 算法下发核心逻辑
+│   ├── mqtt.go              # MQTT通信服务
+│   ├── algorithm_common.go  # 算法通用数据结构和错误码
+│   ├── algorithm_add.go     # 算法添加/下发核心逻辑（新增ZIP解压、版本控制）
+│   └── algorithm_delete.go  # 算法删除核心逻辑
 ├── controller/          📡 HTTP API控制器
 │   ├── algorithm/       # 算法管理API
 │   └── user/           # 用户管理API
 ├── dao/                💾 数据访问层 (自动生成)
 ├── model/              📋 数据模型层
-│   ├── entity/         # 数据库表实体
+│   ├── entity/         # 数据库表实体（增强约束）
 │   └── do/             # 数据操作对象
 └── cmd/                🚀 启动命令层
 ```
 
 ### 🔧 配置和部署
+```
+manifest/
+├── config/config.yaml   # 主配置文件（新增滚动日志配置）
+├── deploy/             # K8s部署配置
+└── docker/             # Docker容器化
+
+data/
+└── init.sql            # 数据库初始化脚本（增强约束和触发器）
+
+logs/                   # 📝 新增：滚动日志目录
+├── app-YYYYMMDD.log    # 当前日志文件（20MB滚动）
+└── app-*.log.gz        # 历史日志文件（自动压缩）
+
+runtime/                # 🗂️ 算法文件存储目录
+└── algorithm/          # 新的目录结构
+    └── {algorithmId}/  # 算法ID目录
+        └── {versionId}/ # 版本ID目录
+            ├── algorithm.zip     # 原始压缩包
+            ├── algorithm.so/.dll # 解压后的动态库
+            └── config.json       # 解压后的配置文件
+
+hack/
+├── config.yaml         # GoFrame CLI配置
+└── *.mk               # 开发脚本
+```
+
+### 📊 业务服务架构
+```
+internal/service/
+├── algorithm_common.go     # 🔧 公共组件
+│   ├── AlgorithmAddRequest
+│   ├── AlgorithmDeleteRequest  
+│   ├── AlgorithmReply
+│   └── 错误码常量 (CodeSuccess, CodeDownloadFailed等)
+│
+├── algorithm_add.go        # ⬇️ 算法添加服务（重构增强）
+│   ├── AlgorithmDownloadService
+│   ├── DownloadAlgorithmFile() - 下载+实时MD5校验
+│   ├── extractAlgorithmFile() - 🆕 ZIP自动解压功能
+│   ├── SyncAlgorithmToDatabase() - 版本去重逻辑
+│   └── cleanupDirectoryOnFailure() - 故障安全清理
+│
+├── algorithm_delete.go     # 🗑️ 算法删除服务
+│   ├── AlgorithmDeleteService
+│   ├── CheckAlgorithmExists()
+│   ├── DeleteAlgorithmFiles()
+│   ├── DeleteAlgorithmFromDatabase()
+│   └── DeleteAlgorithm()
+│
+└── mqtt.go                # 📡 MQTT通信服务
+    ├── handleAlgorithmAdd() → NewAlgorithmDownloadService()
+    └── handleAlgorithmDeleteCorrect() → NewAlgorithmDeleteService()
+```
+
+🎯 **架构优势**
+- 🧩 **单一职责** - 每个文件专注特定功能
+- 🔄 **易于扩展** - 添加新算法操作只需新增文件
+- 🛠️ **便于维护** - 修改特定功能不影响其他模块
+- 📦 **代码复用** - 公共组件统一管理，避免重复
+- 🧪 **便于测试** - 每个服务可以独立进行单元测试
+- 🛡️ **故障隔离** - 完善的错误处理和自动清理机制
 ```
 manifest/
 ├── config/config.yaml   # 主配置文件
@@ -130,15 +175,44 @@ mqtt:
 # 算法下载配置  
 algorithm:
   downloadPath: ""  # 留空自动适配平台路径
-  # Windows: ./runtime/
-  # Linux: /usr/runtime/
+  # Windows: ./runtime/algorithm/
+  # Linux: /usr/runtime/algorithm/
+
+# 📝 滚动日志配置（新增）
+logger:
+  path: "logs"                     # 日志文件存储目录
+  file: "app-{Ymd}.log"           # 日志文件命名格式（按天）
+  rotateSize: "20MB"              # 单个文件大小限制
+  rotateBackupLimit: 5            # 保留历史文件数量
+  rotateBackupExpire: "30d"       # 历史文件过期时间
+  rotateBackupCompress: true      # 压缩历史文件
 ```
 
 ### 跨平台路径自适应
 
-- **开发环境(Windows)**: `./runtime/{algorithmId}/{md5}/`
-- **生产环境(Linux)**: `/usr/runtime/{algorithmId}/{md5}/`
+- **开发环境(Windows)**: `./runtime/algorithm/{algorithmId}/{algorithmVersionId}/`
+- **生产环境(Linux)**: `/usr/runtime/algorithm/{algorithmId}/{algorithmVersionId}/`
 - **自定义路径**: 在配置文件中指定 `algorithm.downloadPath`
+
+### 📦 算法文件组织结构（新版）
+
+```
+runtime/
+└── algorithm/                    # 算法根目录
+    └── {algorithmId}/           # 按算法ID分组
+        └── {algorithmVersionId}/ # 按版本ID分组
+            ├── algorithm.zip     # 🔒 原始压缩包（MD5已校验）
+            ├── algorithm.so      # 🚀 自动解压的动态库
+            ├── algorithm.dll     # 🚀 Windows动态库
+            ├── config.json       # ⚙️ 算法配置文件
+            └── *.so / *.dll      # 📚 其他解压文件
+```
+
+**关键改进**：
+- ✅ **版本隔离**：不同版本独立目录，避免冲突
+- ✅ **自动解压**：ZIP文件下载后自动提取内容
+- ✅ **路径安全**：防止ZIP炸弹和路径遍历攻击
+- ✅ **完整保留**：原始ZIP包和解压文件并存
 
 ## 🔄 MQTT算法下发执行流程详解
 
@@ -186,43 +260,54 @@ sendAlgorithmReply() 发送MQTT响应到配置化回复主题
 #### 3. **文件下载与校验** ⭐
 ```go
 // 位置: internal/service/algorithm_add.go
-// 功能: DownloadAlgorithmFile()
+// 功能: DownloadAlgorithmFile() - 重构增强版本
 
-步骤1: 创建目录结构 {downloadPath}/{algorithmId}/{md5}/
+步骤1: 创建版本化目录 {downloadPath}/algorithm/{algorithmId}/{algorithmVersionId}/
 步骤2: HTTP GET 下载文件到本地
-步骤3: 实时计算MD5哈希值
+步骤3: 实时计算MD5哈希值（边下载边计算）
 步骤4: 校验MD5是否匹配
-步骤5: 失败时自动清理不完整文件
+步骤5: 🆕 自动解压ZIP文件到同级目录
+步骤6: 故障时自动清理不完整文件和目录
+
+解压功能详解:
+- 支持标准ZIP格式算法包
+- 自动提取动态库文件 (.so/.dll)
+- 自动提取配置文件 (.json/.yaml/.xml等)
+- 路径安全检查，防止ZIP炸弹攻击
+- 解压失败时完整回滚清理
 
 错误处理:
 - 下载失败 → 错误码 1001
 - MD5校验失败 → 错误码 1002  
 - 文件系统错误 → 错误码 1003
+- 🆕 解压失败 → 错误码 1007
 ```
 
 #### 4. **数据库同步** 🗃️
 ```go
 // 位置: internal/service/algorithm_add.go  
-// 功能: SyncAlgorithmToDatabase()
+// 功能: SyncAlgorithmToDatabase() - 增强版本管理
 
-重要逻辑: 只有文件下载成功并通过MD5校验，才会写入数据库！
+🆕 版本去重机制:
+- 基于 (algorithmId + algorithmVersion) 复合唯一约束
+- 相同版本存在时直接忽略，避免重复下载
+- 支持同一算法的多个版本并存
+- 自动记录版本变更历史
 
-算法覆盖逻辑:
-- 检查算法ID是否已存在
-- 如果是新算法 → INSERT新记录
-- 如果算法已存在 → 实现完全覆盖:
-  * 无论版本是否相同，都清理旧算法的完整目录
-  * UPDATE数据库记录（包括版本、MD5、文件路径等）
-  * 记录版本变更或覆盖操作的日志
+数据库增强约束:
+- MD5字段：强制32位十六进制格式 CHECK(length(md5) = 32)
+- 复合唯一：UNIQUE(algorithm_id, algorithm_version)
+- 自动时间戳：created_at, updated_at 触发器维护
+- 存储路径：记录解压后的完整目录路径
 
 处理逻辑:
-- 新算法: INSERT新记录到数据库
-- 存在算法: 清理旧目录 → UPDATE记录 → 存储新的元数据
-- 支持相同版本覆盖（比如算法代码修正但版本号未变）
+- 🆕 新版本: INSERT新记录到数据库
+- 🔄 已存在版本: 直接返回成功，记录跳过日志
+- 📝 操作日志: 记录所有版本检查和数据库操作
 
 错误处理:
 - 数据库操作失败 → 错误码 1004
-- 旧文件清理失败 → 记录警告但不阻止更新
+- 版本查询失败 → 记录错误日志但不中断流程
 ```
 
 #### 5. **MQTT响应发送**
@@ -305,41 +390,42 @@ go run .
 
 **发布算法下发请求**:
 - **主题**: `/sys/i800/edge-device-001/request`
-- **消息**:
+- **消息**（更新字段）:
 ```json
 {
   "cmdId": "test-001",
   "version": "1.0",
   "method": "algorithm.add",
-  "timestamp": "2025-09-12 17:30:00",
+  "timestamp": "2025-09-18 17:30:00",
   "params": {
     "algorithmId": "algo-test-001",
     "algorithmName": "测试算法",
     "algorithmVersion": "v1.0.0",
     "algorithmVersionId": "version-001",
-    "algorithmDataUrl": "https://httpbin.org/base64/SGVsbG8gV29ybGQ=",
-    "fileSize": 12,
-    "lastModifyTime": "2025-09-12 17:30:00",
-    "md5": "65a8e27d8879283831b664bd8b7f0ad4"
+    "algorithmDataUrl": "https://httpbin.org/base64/UEsDBBQDAAAAAL11XlEAAAAAAAAAAAAAAAAJAAAAYWxnb3JpdGhtL1BLAwQUAwAAAAC9dV5RAAAAAAAAAAAAAAAAABEAAABhbGdvcml0aG0vY29uZmlnLmpzb25QSwMEFAMAAAAAvXVeUQAAAAAAAAAAAAAAAA8AAABhbGdvcml0aG0vbGliLnNvUEsBAj8AFAMAAAAAvXVeUQAAAAAAAAAAAAAAAAkAJAAAAAAAAAAQAAAAAAAAAGFsZ29yaXRobS8KACAAAAAAAQAYAK6zKzrcyDgBrrMrOtzIOAGusys63Mg4AQ==",
+    "fileSize": 245,
+    "lastModifyTime": "2025-09-18 17:30:00",
+    "md5": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
   }
 }
 ```
+> 💡 **示例说明**: 上述URL是一个包含算法目录结构的ZIP文件的base64编码，解压后包含 `algorithm/config.json` 和 `algorithm/lib.so` 文件
 
 **订阅响应结果**:
 - **主题**: `/sys/i800/edge-device-001/reply`
-- **成功响应示例**:
+- **成功响应示例**（更新路径结构）:
 ```json
 {
   "cmdId": "test-001",
   "version": "1.0",
   "method": "algorithm.add", 
-  "timestamp": "2025-09-12 17:30:01",
+  "timestamp": "2025-09-18 17:30:01",
   "code": 0,
   "message": "算法添加成功",
   "data": {
     "algorithmId": "algo-test-001",
     "version": "v1.0.0",
-    "localPath": "./runtime/algo-test-001/65a8e27d8879283831b664bd8b7f0ad4/SGVsbG8gV29ybGQ="
+    "localPath": "./runtime/algorithm/algo-test-001/version-001/"
   }
 }
 ```
@@ -347,10 +433,17 @@ go run .
 ### 3. 验证测试结果
 
 ✅ **成功标志**:
-1. **目录创建**: 项目根目录下出现 `runtime/` 文件夹
-2. **文件下载**: `runtime/algo-test-001/65a8e27d8879283831b664bd8b7f0ad4/` 目录下有下载的算法文件  
-3. **数据库记录**: SQLite数据库中 `algorithm` 表新增记录
+1. **版本化目录**: 项目根目录下 `runtime/algorithm/algo-test-001/version-001/`
+2. **文件完整性**: 
+   - 原始ZIP文件: `algorithm.zip`
+   - 自动解压文件: `config.json`, `lib.so` 等
+3. **数据库记录**: SQLite数据库中 `algorithm` 表新增记录，包含版本信息
 4. **MQTT回复**: 收到 `code: 0` 的成功响应
+5. **📝 日志记录**: `logs/` 目录下生成详细的操作日志
+
+🔍 **版本去重测试**:
+- 发送相同 `algorithmId` + `algorithmVersion` 的请求
+- 系统应返回成功但跳过下载（检查日志确认）
 
 ## 🔍 错误码详细说明
 
@@ -363,41 +456,85 @@ go run .
 | 1004 | 数据库错误 | SQLite连接失败/SQL执行异常/表结构问题 | 检查数据库文件权限、表结构、SQL语法 | ❌ 数据库同步阶段 |
 | 1005 | 参数错误 | algorithmId/algorithmDataUrl/md5缺失 | 检查MQTT消息格式和必要参数完整性 | ❌ 参数验证阶段 |
 | 1006 | 算法不存在 | 删除不存在的算法ID | 检查算法ID是否正确、是否已被删除 | ❌ 算法删除阶段 |
+| 🆕 1007 | ZIP解压失败 | 压缩文件格式错误/解压权限不足/磁盘空间不足 | 检查ZIP文件完整性、解压目录权限、磁盘空间 | ❌ 文件解压阶段 |
 
-### 🔄 错误处理流程
+### 🔄 错误处理流程（增强版）
 
 ```
 MQTT请求接收
     ↓
 参数验证 (错误码1005)
     ↓
-创建目录结构 (/usr/runtime/algorithmId/md5sum/)
+🆕 版本存在性检查 (基于algorithmId + algorithmVersion)
+    ↓ (版本已存在) → 直接返回成功，记录跳过日志
+创建版本化目录结构 (algorithm/{algorithmId}/{algorithmVersionId}/)
     ↓
 文件下载 (错误码1001) ❌→ 清理空目录
     ↓  
 MD5校验 (错误码1002) ❌→ 删除文件 + 清理空目录
     ↓
+🆕 ZIP自动解压 (错误码1007) ❌→ 删除文件 + 清理空目录
+    ↓
 文件系统操作 (错误码1003) ❌→ 清理空目录
     ↓
 数据库同步 (错误码1004)
     ↓
+📝 滚动日志记录 (所有操作持久化记录)
+    ↓
 响应发送 (错误码0-成功)
 
-🧹 智能清理机制:
-- cleanupDirectoryOnFailure() 自动清理创建的空目录
-- 避免失败后留下 runtime/algorithmId/ 空文件夹  
-- 只删除确认为空的目录，保护现有数据
-- 🔧 **Windows文件句柄优化**: 确保HTTP响应体正确关闭，防止"文件正在使用"错误
+简化：
+📥 MQTT算法下发请求
+    ↓
+🔍 版本存在性检查（数据库查询）
+    ↓
+📥 HTTP文件下载（流式处理）
+    ↓
+🔐 实时MD5计算（边下载边校验）
+    ↓
+✅ MD5值对比验证
+    ↓
+📦 ZIP文件解压校验
+    ↓
+💾 数据库记录存储（复合约束）
+    ↓
+🏠 文件系统组织（版本化目录）
+    ↓
+🎉 校验完成，算法就绪
+
+🧹 智能清理机制增强:
+- cleanupDirectoryOnFailure() 支持版本化目录清理
+- 避免失败后留下 runtime/algorithm/{algorithmId}/{versionId}/ 空文件夹  
+- 只删除确认为空的目录，保护现有算法版本
+- 🔧 **Windows文件句柄优化**: 确保HTTP响应体和ZIP文件正确关闭
 - 🔄 **重试机制**: 带延迟重试的目录删除，提高清理成功率
 - ⏱️ **延迟清理**: 等待文件句柄释放后再执行清理操作
+- 🛡️ **路径安全**: ZIP解压时防止路径遍历攻击
 ```
 
-### 🔄 **算法覆盖机制**
+### 🎯 **版本管理机制**（重构升级）
 
-**覆盖逻辑**:
+**新版本去重逻辑**:
 ```
-如果算法已存在 (相同algorithmId):
-  ✅ 完全覆盖模式
+算法下发请求 → 版本存在性检查 (algorithmId + algorithmVersion)
+    ↓
+如果版本已存在:
+  ✅ 直接返回成功响应
+  📝 记录日志: "算法版本已存在，忽略下发"
+  🚫 跳过下载、解压、数据库操作
+  💡 避免重复处理，节省网络和存储资源
+
+如果版本不存在:
+  📥 执行完整下发流程
+  📦 下载 → MD5校验 → ZIP解压 → 数据库记录
+  🗂️ 新版本与现有版本并存，互不干扰
+  
+支持场景:
+- ✅ 同一算法的多个版本并存 (v1.0, v1.1, v2.0)
+- ✅ 版本升级时保留历史版本
+- ✅ 重复下发请求的幂等性处理
+- ✅ 网络异常重试时的去重保护
+```
   │
   ├── 清理旧算法目录 (/usr/runtime/algorithmId/)
   ├── 下载新算法文件 
@@ -660,6 +797,120 @@ internal/model/
 ├── do/user.go          # Data Object - 数据库操作对象
 └── entity/user.go      # Entity - 数据库表对应的实体结构体
 ```
+
+---
+
+## 🆕 最新功能特性 (v2.1.0)
+
+### 🎯 1. 智能版本管理系统
+- **复合唯一约束**: 基于 `(algorithmId + algorithmVersion)` 防重复
+- **版本并存**: 支持同一算法的多个版本独立存储
+- **智能去重**: 相同版本请求自动跳过，避免重复下载
+- **版本隔离**: 独立目录结构 `algorithm/{algorithmId}/{algorithmVersionId}/`
+
+### 📦 2. ZIP自动解压系统
+- **无缝解压**: MD5校验通过后自动解压ZIP算法包
+- **安全防护**: 内置ZIP炸弹和路径遍历攻击防护
+- **文件保留**: 原始ZIP包与解压文件并存
+- **跨平台**: 自动识别动态库文件 (.so/.dll) 和配置文件
+
+### 📝 3. 滚动日志系统
+- **文件滚动**: 20MB自动滚动，保持日志文件大小可控
+- **自动压缩**: 历史日志文件自动gzip压缩节省空间
+- **保留策略**: 保留5个历史文件，30天自动清理
+- **持久化**: 所有操作完整记录，便于故障排查和审计
+
+### 🛡️ 4. 增强数据约束
+- **MD5格式**: 强制32位十六进制格式校验 `CHECK(length(md5) = 32)`
+- **自动时间戳**: `created_at`/`updated_at` 触发器自动维护
+- **复合约束**: 数据库级别防止版本重复
+- **完整性保护**: 多层校验确保数据一致性
+
+### 🔧 5. 配置化增强
+```yaml
+# 新增配置项
+logger:
+  rotateSize: "20MB"              # 日志文件滚动大小
+  rotateBackupLimit: 5            # 保留历史文件数
+  rotateBackupExpire: "30d"       # 过期清理时间
+  rotateBackupCompress: true      # 自动压缩
+
+algorithm:
+  downloadPath: ""                # 支持自定义下载路径
+  # 新的目录结构: algorithm/{algorithmId}/{algorithmVersionId}/
+```
+
+---
+
+## 📈 性能优化与稳定性
+
+### ⚡ 性能改进
+- **流式MD5计算**: 下载过程中实时计算，无需二次读取
+- **版本预检**: 避免不必要的网络下载和文件操作
+- **延迟清理**: 优化Windows平台文件句柄释放
+- **并行安全**: 支持多个算法同时下载不冲突
+
+### 🛡️ 稳定性提升
+- **故障自愈**: 完整的错误回滚和清理机制
+- **路径安全**: 防止ZIP解压时的安全漏洞
+- **资源管理**: 确保HTTP连接和文件句柄正确释放
+- **幂等性**: 支持请求重试而不产生副作用
+
+---
+
+## 🔄 升级指南
+
+### 从 v1.0 升级到 v2.1
+
+1. **数据库迁移**:
+```sql
+-- 新增复合唯一约束和CHECK约束
+-- 系统会自动应用 data/init.sql 中的新约束
+```
+
+2. **配置更新**:
+```yaml
+# manifest/config/config.yaml 新增日志配置
+logger:
+  path: "logs"
+  rotateSize: "20MB"
+  rotateBackupLimit: 5
+  rotateBackupExpire: "30d"
+  rotateBackupCompress: true
+```
+
+3. **目录结构适配**:
+- 旧版: `runtime/{algorithmId}/{md5}/`
+- 新版: `runtime/algorithm/{algorithmId}/{algorithmVersionId}/`
+- 自动向前兼容，无需手动迁移
+
+### 兼容性说明
+- ✅ MQTT接口完全向后兼容
+- ✅ HTTP API接口保持不变
+- ✅ 数据库表结构向前兼容
+- ✅ 配置文件向后兼容（新增项可选）
+
+---
+
+## 🎯 后续规划
+
+- 🔄 **算法热更新**: 支持运行时算法版本切换
+- 📊 **性能监控**: 添加算法执行性能统计
+- 🌐 **集群支持**: 支持多节点算法同步
+- 🔐 **安全增强**: 添加算法文件数字签名验证
+- 📱 **管理界面**: Web端算法管理控制台
+
+---
+
+## 📞 技术支持
+
+如有问题，请查看：
+1. 📝 **日志文件**: `logs/app-YYYYMMDD.log`
+2. 🔍 **错误码说明**: 参考上述错误码表格
+3. 🛠️ **配置检查**: 确认MQTT连接和路径配置
+4. 📊 **数据库状态**: 检查SQLite文件权限和表结构
+
+---
 
 **作用**:
 - **entity**: 数据库表映射的Go结构体（通过GoFrame工具自动生成）
