@@ -4,7 +4,7 @@
 
 ## ⭐ 核心功能
 
-- 🔗 **MQTT算法下发**: 支持云端通过MQTT协议下发算法文件
+- 🔗 **MQTT算法下发**: 支持云端通过MQTT协议进行算法下发、启停等管理
 - 📁 **智能文件管理**: 自动下载、MD5校验、版本管理、ZIP自动解压
 - 🗃️ **数据同步**: SQLite数据库存储算法信息，复合唯一约束
 - 🔄 **跨平台支持**: Windows开发、Linux部署自适应
@@ -16,8 +16,17 @@
 ## 🚀 快速开始
 
 ```bash
-# 启动项目
+# 快速启动项目
 go run .
+
+# 编译和运行项目
+bash script/run.sh
+
+# 同步目标文件到目标设备I-800
+bash script/rsync.sh
+
+# 目标设备I-800上部署自启动服务脚本并启动
+bash script/deploy.sh install
 
 # 访问API文档
 http://127.0.0.1:8000/swagger/
