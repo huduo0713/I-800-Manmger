@@ -55,6 +55,10 @@ case "$cmd" in
         run "cp -f '$SCRIPT_SRC' '$TARGET_PATH'"
         run "chmod 755 '$TARGET_PATH'"
         echo "已安装 $TARGET_PATH"
+        run "'$TARGET_PATH' start || true"
+        echo "已启动 $TARGET_PATH start"
+        echo "查看日志：tail -f /var/log/app_mng.log"
+
         ;;
     remove)
         if [ -f "$TARGET_PATH" ]; then

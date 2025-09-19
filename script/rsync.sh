@@ -17,7 +17,7 @@ REMOTE_PATH="/root/"
 
 ROOT_DIR="$(pwd)"
 APP_FILE="app_mng"
-DIRS=("data" "manifest")
+DIRS=("data" "manifest" "script")
 
 SOURCES=(app_mng deploy.sh app_service.sh data/ manifest/)
 
