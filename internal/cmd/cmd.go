@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -70,18 +71,50 @@ func startMQTTAlgorithmService(ctx context.Context) {
 	// 从配置文件获取设备ID，如果没有配置则使用默认值
 	deviceId := g.Cfg().MustGet(ctx, "device.id", "edge-device-001").String()
 
-	// 获取MQTT服务实例
-	mqttService := service.Mqtt()
+	// 异步启动MQTT算法监听服务，避免阻塞主程序
+	go func() {
+		// 获取MQTT服务实例
+		mqttService := service.Mqtt()
 
-	// 启动算法消息监听
-	err := mqttService.StartAlgorithmMessageListener(deviceId)
-	if err != nil {
-		g.Log().Errorf(ctx, "启动MQTT算法监听服务失败: %v", err)
-		return
-	}
+		// 等待MQTT连接建立，但不无限等待
+		maxWaitTime := 60 // 最多等待60秒
+		waitInterval := 2 // 每2秒检查一次
+		waited := 0
 
-	g.Log().Info(ctx, "MQTT算法处理服务启动成功", g.Map{
-		"deviceId": deviceId,
-		"topic":    "/sys/i800/" + deviceId + "/request",
-	})
+		for waited < maxWaitTime {
+			if mqttService.IsConnected() {
+				// MQTT已连接，启动算法消息监听
+				err := mqttService.StartAlgorithmMessageListener(deviceId)
+				if err != nil {
+					g.Log().Error(ctx, "❌ 启动MQTT算法监听服务失败", g.Map{
+						"error":    err.Error(),
+						"deviceId": deviceId,
+						"action":   "将在MQTT重连成功后自动启动",
+					})
+					return
+				}
+
+				g.Log().Info(ctx, "✅ MQTT算法处理服务启动成功", g.Map{
+					"deviceId": deviceId,
+					"topic":    "/sys/i800/" + deviceId + "/request",
+				})
+				return
+			}
+
+			// MQTT未连接，继续等待
+			g.Log().Debug(ctx, "⏳ 等待MQTT连接建立...", g.Map{
+				"waited": waited,
+				"max":    maxWaitTime,
+			})
+
+			time.Sleep(time.Duration(waitInterval) * time.Second)
+			waited += waitInterval
+		}
+
+		// 超时未连接
+		g.Log().Warning(ctx, "⚠️ MQTT连接超时，算法监听服务将在连接成功后自动启动", g.Map{
+			"waitedTime": waited,
+			"deviceId":   deviceId,
+		})
+	}()
 }
