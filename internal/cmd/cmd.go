@@ -68,13 +68,13 @@ func initDatabase(ctx context.Context) {
 
 // startMQTTAlgorithmService 启动MQTT算法处理服务
 func startMQTTAlgorithmService(ctx context.Context) {
-	// 从配置文件获取设备ID，如果没有配置则使用默认值
-	deviceId := g.Cfg().MustGet(ctx, "device.id", "edge-device-001").String()
-
 	// 异步启动MQTT算法监听服务，避免阻塞主程序
 	go func() {
 		// 获取MQTT服务实例
 		mqttService := service.Mqtt()
+
+		// 使用MQTT服务中动态检测到的设备ID（MAC地址）
+		deviceId := mqttService.GetDeviceId()
 
 		// 等待MQTT连接建立，但不无限等待
 		maxWaitTime := 60 // 最多等待60秒

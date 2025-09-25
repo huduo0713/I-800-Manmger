@@ -21,7 +21,13 @@ type sMqtt struct {
 	subscriptions      map[string]byte      // 跟踪已订阅的主题和QoS（当前连接状态）
 	savedSubscriptions map[string]byte      // 保存的订阅记录（用于重连恢复）
 	subMutex           sync.RWMutex         // 订阅操作的读写锁
-	deviceId           string               // 设备ID，用于重连时恢复订阅
+	deviceId           string               // 设备ID（MAC地址），用于重连时恢复订阅
+
+	// 🌐 网络检测与设备注册相关
+	networkInterface *NetworkInterface        // 当前使用的网络接口信息
+	registerService  *DeviceRegisterService   // 设备注册服务
+	netDetectService *NetworkDetectionService // 网络检测服务
+	isFirstConnect   bool                     // 标记是否为首次连接
 }
 
 var (
@@ -34,10 +40,33 @@ func Mqtt() *sMqtt {
 	mqttOnce.Do(func() {
 		ctx := gctx.New()
 
+		// 🌐 网络接口检测
+		g.Log().Info(ctx, "🌐 开始网络接口检测...")
+		netDetectService := NewNetworkDetectionService()
+		networkInterface, err := netDetectService.DetectAvailableNetwork()
+		if err != nil {
+			g.Log().Errorf(ctx, "❌ 网络接口检测失败: %v", err)
+			g.Log().Warning(ctx, "⚠️ 将使用默认配置继续启动")
+			// 使用默认网络配置
+			networkInterface = &NetworkInterface{
+				Name: "default",
+				MAC:  "00-00-00-00-00-00",
+				IP:   "127.0.0.1",
+			}
+		}
+
+		// 📝 更新设备ID为检测到的MAC地址
+		deviceId := networkInterface.MAC
+		g.Log().Infof(ctx, "🏷️ 设备ID: %s", deviceId)
+
 		// --- MQTT 客户端配置 ---
 		// 从配置文件读取MQTT服务器配置
 		broker := g.Cfg().MustGet(ctx, "mqtt.broker", "tcp://127.0.0.1:1883").String()
-		clientId := g.Cfg().MustGet(ctx, "mqtt.clientId", "goframe-edge-device").String()
+
+		// 🆔 动态生成ClientID: edge-{MAC地址}
+		clientId := fmt.Sprintf("edge-%s", deviceId)
+		g.Log().Infof(ctx, "🔗 MQTT客户端ID: %s", clientId)
+
 		keepAlive := g.Cfg().MustGet(ctx, "mqtt.keepAlive", 60).Int()
 		pingTimeout := g.Cfg().MustGet(ctx, "mqtt.pingTimeout", 10).Int()
 		connectTimeout := g.Cfg().MustGet(ctx, "mqtt.connectTimeout", 30).Int()
@@ -85,19 +114,7 @@ func Mqtt() *sMqtt {
 			}
 		})
 
-		// 📡 连接状态回调
-		opts.OnConnect = func(client mqtt.Client) {
-			g.Log().Info(gctx.New(), "🟢 MQTT连接成功", g.Map{
-				"broker":   broker,
-				"clientId": clientId,
-				"time":     time.Now().Format("2006-01-02 15:04:05"),
-			})
-
-			// 重连后自动恢复算法消息监听
-			if mqttService != nil {
-				go mqttService.reconnectSubscriptions()
-			}
-		}
+		// 📡 连接状态回调 - 这个回调会在mqttService创建后被设置
 
 		// ❌ 连接丢失回调
 		opts.OnConnectionLost = func(client mqtt.Client, err error) {
@@ -137,17 +154,54 @@ func Mqtt() *sMqtt {
 			})
 		}
 
-		// 创建客户端实例
-		client := mqtt.NewClient(opts)
+		// 先创建mqttService结构体（不包含client）
 
 		mqttService = &sMqtt{
-			client:             client,
 			messages:           make([]entity.MqttMessage, 0),
 			subscriptions:      make(map[string]byte),
 			savedSubscriptions: make(map[string]byte),
+			deviceId:           deviceId,
+			networkInterface:   networkInterface,
+			netDetectService:   netDetectService,
+			isFirstConnect:     true, // 初始化为true，表示首次连接
 		}
 
-		// 🔄 异步连接MQTT，避免阻塞主程序启动
+		// � 设置正确的连接回调（mqttService初始化后）
+		opts.OnConnect = func(client mqtt.Client) {
+			isReconnect := !mqttService.isFirstConnect
+			if mqttService.isFirstConnect {
+				mqttService.isFirstConnect = false // 首次连接后设置为false
+			}
+
+			connectionType := "首次连接"
+			if isReconnect {
+				connectionType = "重连"
+			}
+
+			g.Log().Info(gctx.New(), "🟢 MQTT连接成功", g.Map{
+				"broker":         broker,
+				"clientId":       clientId,
+				"deviceId":       deviceId,
+				"connectionType": connectionType,
+				"time":           time.Now().Format("2006-01-02 15:04:05"),
+			})
+
+			// 只有在重连时才恢复订阅
+			if isReconnect {
+				g.Log().Info(gctx.New(), "🔄 检测到重连，开始恢复订阅...")
+				go mqttService.reconnectSubscriptions()
+			}
+
+			// 🏷️ 设备注册：连接成功后自动发送设备注册消息
+			g.Log().Debug(gctx.New(), "🏷️ 准备执行设备注册...")
+			go mqttService.handleDeviceRegistration(client, isReconnect)
+		}
+
+		// 创建客户端实例（在回调设置之后）
+		client := mqtt.NewClient(opts)
+		mqttService.client = client
+
+		// �🔄 异步连接MQTT，避免阻塞主程序启动
 		go func() {
 			g.Log().Info(ctx, "🔄 开始连接MQTT broker...")
 
@@ -896,4 +950,110 @@ func (s *sMqtt) sendAlgorithmReply(reply *AlgorithmReply, deviceId string) {
 			"code":  reply.Code,
 		})
 	}
+}
+
+// ================================== 设备注册相关方法 ==================================
+
+// handleDeviceRegistration 处理设备注册
+func (s *sMqtt) handleDeviceRegistration(client mqtt.Client, isReconnect bool) {
+	ctx := gctx.New()
+	g.Log().Debug(ctx, "🏷️ 进入设备注册处理方法, isReconnect=%t", isReconnect)
+
+	// 检查是否启用设备注册
+	enableRegister := g.Cfg().MustGet(ctx, "mqtt.register.enable", true).Bool()
+	if !enableRegister {
+		g.Log().Info(ctx, "⏭️ 设备注册功能已禁用")
+		return
+	}
+
+	// 检查连接类型的注册开关
+	if isReconnect {
+		if !g.Cfg().MustGet(ctx, "mqtt.register.onReconnect", true).Bool() {
+			g.Log().Info(ctx, "⏭️ 重连时设备注册已禁用")
+			return
+		}
+	} else {
+		if !g.Cfg().MustGet(ctx, "mqtt.register.onConnect", true).Bool() {
+			g.Log().Info(ctx, "⏭️ 首次连接设备注册已禁用")
+			return
+		}
+	}
+
+	// 创建或更新设备注册服务
+	if s.registerService == nil {
+		s.registerService = NewDeviceRegisterService(client, s.networkInterface)
+	} else {
+		s.registerService.UpdateNetworkInterface(s.networkInterface)
+	}
+
+	// 执行设备注册
+	registerType := "首次连接"
+	if isReconnect {
+		registerType = "重连"
+	}
+
+	g.Log().Infof(ctx, "🏷️ 开始设备注册 (%s): DeviceId=%s", registerType, s.deviceId)
+
+	// 异步执行注册，避免阻塞
+	go func() {
+		err := s.registerService.Register()
+		if err != nil {
+			g.Log().Errorf(ctx, "❌ 设备注册失败 (%s): %v", registerType, err)
+
+			// 启动重试机制
+			g.Log().Info(ctx, "🔄 启动设备注册重试机制")
+			go s.registerService.RegisterWithRetry()
+		} else {
+			g.Log().Infof(ctx, "✅ 设备注册成功 (%s): DeviceId=%s", registerType, s.deviceId)
+		}
+	}()
+}
+
+// GetDeviceInfo 获取设备信息
+func (s *sMqtt) GetDeviceInfo() (deviceId string, networkInterface *NetworkInterface) {
+	return s.deviceId, s.networkInterface
+}
+
+// GetDeviceId 获取设备ID（MAC地址）
+func (s *sMqtt) GetDeviceId() string {
+	return s.deviceId
+}
+
+// UpdateNetworkInterface 更新网络接口信息
+func (s *sMqtt) UpdateNetworkInterface() error {
+	ctx := gctx.New()
+
+	g.Log().Info(ctx, "🔄 重新检测网络接口...")
+
+	// 重新检测网络接口
+	newInterface, err := s.netDetectService.DetectAvailableNetwork()
+	if err != nil {
+		return fmt.Errorf("网络接口重新检测失败: %v", err)
+	}
+
+	// 检查是否有变化
+	oldDeviceId := s.deviceId
+	newDeviceId := newInterface.MAC
+
+	if oldDeviceId != newDeviceId {
+		g.Log().Infof(ctx, "⚠️ 检测到网络接口变化: %s -> %s", oldDeviceId, newDeviceId)
+
+		// 更新内部状态
+		s.deviceId = newDeviceId
+		s.networkInterface = newInterface
+
+		// 更新设备注册服务
+		if s.registerService != nil {
+			s.registerService.UpdateNetworkInterface(newInterface)
+		}
+
+		// 重新发送设备注册
+		if s.client != nil && s.client.IsConnected() {
+			go s.handleDeviceRegistration(s.client, false)
+		}
+	} else {
+		g.Log().Info(ctx, "✅ 网络接口未发生变化")
+	}
+
+	return nil
 }
