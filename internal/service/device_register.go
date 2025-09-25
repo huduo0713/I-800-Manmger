@@ -22,6 +22,7 @@ type DeviceRegisterService struct {
 	retryCount    int
 	maxRetries    int
 	retryInterval time.Duration
+	portChecker   *PortChecker // 端口检测器
 }
 
 // DeviceRegisterRequest 设备注册请求结构
@@ -35,10 +36,11 @@ type DeviceRegisterRequest struct {
 
 // DeviceRegisterRequestParams 设备注册请求参数
 type DeviceRegisterRequestParams struct {
-	DeviceModule string `json:"deviceModule"` // 设备模块名
-	DeviceId     string `json:"deviceId"`     // 设备ID (MAC地址)
-	HeartBeat    int    `json:"heartBeat"`    // 心跳周期(秒)
-	IP           string `json:"IP"`           // 设备IP地址
+	DeviceModule  string `json:"deviceModule"`  // 设备模块名
+	DeviceId      string `json:"deviceId"`      // 设备ID (MAC地址)
+	HeartBeat     int    `json:"heartBeat"`     // 心跳周期(秒)
+	IP            string `json:"IP"`            // 设备IP地址
+	RuntimeStatus int    `json:"runtimeStatus"` // Runtime进程状态 (1-正常运行，0-停止)
 }
 
 // NewDeviceRegisterService 创建设备注册服务
@@ -56,6 +58,7 @@ func NewDeviceRegisterService(mqttClient mqtt.Client, networkIface *NetworkInter
 		deviceId:      networkIface.MAC, // deviceId就是MAC地址
 		maxRetries:    maxRetries,
 		retryInterval: retryInterval,
+		portChecker:   NewPortChecker(), // 初始化端口检测器
 	}
 }
 
@@ -119,6 +122,10 @@ func (s *DeviceRegisterService) buildRegisterMessage() (string, error) {
 	deviceModule := g.Cfg().MustGet(ctx, "device.module", "I-800-RK").String()
 	heartBeat := g.Cfg().MustGet(ctx, "mqtt.keepAlive", 60).Int()
 
+	// 检测 runtime 状态（1231端口监听状态）
+	runtimeStatus := s.portChecker.GetRuntimeStatus()
+	g.Log().Debugf(ctx, "🔍 Runtime状态检测: 1231端口监听 = %d", runtimeStatus)
+
 	// 构建注册请求
 	request := DeviceRegisterRequest{
 		CmdId:     guid.S(),
@@ -126,10 +133,11 @@ func (s *DeviceRegisterService) buildRegisterMessage() (string, error) {
 		Method:    "event.register",
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 		Params: DeviceRegisterRequestParams{
-			DeviceModule: deviceModule,
-			DeviceId:     s.deviceId,
-			HeartBeat:    heartBeat,
-			IP:           s.networkIface.IP,
+			DeviceModule:  deviceModule,
+			DeviceId:      s.deviceId,
+			HeartBeat:     heartBeat,
+			IP:            s.networkIface.IP,
+			RuntimeStatus: runtimeStatus,
 		},
 	}
 
