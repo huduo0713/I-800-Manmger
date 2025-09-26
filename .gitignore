@@ -18,7 +18,6 @@ manifest/output/
 temp/
 temp.yaml
 bin
-**/config/config.yaml
 data/sqlite.db
 data/*.db
 runtime/

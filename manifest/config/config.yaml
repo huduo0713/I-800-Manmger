@@ -1,0 +1,116 @@
+# https://goframe.org/docs/web/server-config-file-template
+server:
+  address:     ":8000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+
+# https://goframe.org/docs/core/glog-config
+logger:
+  level : "info"        # 日志级别: debug, info, notice, warning, error, fatal, all
+  stdout: true
+
+  # 文件输出配置
+  path: "logs"              # 日志文件存储目录
+  file: "app.log"           # 当前日志文件（不加日期）
+
+  # 滚动配置 - 生产环境设置
+  rotateSize: "20MB"        # 单个日志文件大小限制: 20M
+  rotateBackupLimit: 5      # 保留历史日志文件数量: 5个
+  rotateBackupExpire: "30d" # 历史日志文件过期时间: 30天
+  rotateBackupCompress: true # 压缩历史日志文件
+
+  # 时间格式
+  timeFormat: "2006-01-02 15:04:05"
+
+  # 其他配置
+  flags: "std"              # 标准日志格式
+  writerColorEnable: false  # 文件输出不使用颜色
+
+# https://goframe.org/docs/core/gdb-config-file
+database:
+  default:
+    link: "sqlite::@file(./data/sqlite.db)"
+
+# 边缘设备配置
+device:
+  # id 参数已删除 - 现在使用网卡MAC地址自动生成设备ID
+  module: "I-800-RK"        # 设备模块名
+
+  # 🔍 Runtime状态检测配置
+  runtime:
+    port: 1231              # Runtime进程监听端口
+
+  # � OPC UA服务配置
+  opcua:
+    serverPort: 4840        # OPC UA服务器端口
+
+  # �🌐 网卡检测配置
+  network:
+    # 网卡检测模式: auto(自动检测), manual(手动指定), config(配置优先级)
+    mode: "auto"
+
+    # 手动指定网卡 (mode=manual时使用) - 需要时填入具体值
+    interface: ""  # 网卡名称，如 "eth0", "wlan0"
+    mac: ""       # MAC地址，如 "AA-BB-CC-DD-EE-FF"
+    ip: ""        # IP地址，如 "192.168.1.100"
+
+    # 网卡优先级 (mode=config时使用)
+    priority:
+      - "eth0"      # 有线网卡优先
+      - "ens"       # Ubuntu网卡
+      - "enp"       # 新版Ubuntu网卡
+      - "wlan"      # 无线网卡
+      - "wlp"       # 新版无线网卡
+
+    # 连通性测试配置
+    connectivity:
+      timeout: 3    # 连接测试超时时间(秒)
+      retries: 2    # 测试重试次数
+
+# MQTT服务配置
+mqtt:
+  # 🔗 连接配置
+  # broker: "tcp://broker.emqx.io:1883"  # 公共测试MQTT服务器
+  # broker: "tcp://10.77.26.5:16003"       # 你的MQTT服务器地址（连接测试）
+  broker: "tcp://113.249.91.53:1886"       # 你的MQTT服务器地址（正式环境）
+  # clientId 参数已删除 - 现在使用 edge-{MAC地址} 格式自动生成
+
+  # 🔄 可靠性配置
+  keepAlive: 60           # 心跳间隔（秒）
+  pingTimeout: 10         # ping超时时间（秒）
+  connectTimeout: 30      # 连接超时时间（秒）
+  autoReconnect: true     # 启用自动重连
+  maxReconnectInterval: 60 # 最大重连间隔（秒）
+  connectRetryInterval: 5  # 重连间隔（秒）
+  connectRetry: true      # 启用连接重试
+  cleanSession: false     # 持久会话，重连后恢复订阅
+
+  # 🏥 健康检查配置
+  healthCheck:
+    enable: true          # 启用健康检查
+    interval: 30          # 检查间隔（秒）
+
+  # 📡 主题配置
+  topics:
+    algorithm:
+      request: "/sys/i800/{deviceId}/request"   # 算法下发请求主题
+      reply: "/sys/i800/{deviceId}/reply"       # 算法下发响应主题
+
+    # 🏷️ 设备注册主题配置
+    device:
+      register: "/sys/i800/{deviceId}/event/register"  # 设备注册主题
+
+  # 🏷️ 设备注册配置
+  register:
+    enable: true            # 启用设备注册功能
+    onConnect: true         # 连接成功时自动注册
+    onReconnect: true      # 重连成功时自动注册
+    retryInterval: 30      # 注册失败重试间隔(秒)
+    maxRetries: 3          # 最大重试次数
+
+# 算法下载配置
+algorithm:
+  downloadPath: ""  # 留空将自动根据操作系统选择路径
+  # Windows: ./runtime/algorithm
+  # Linux: /usr/runtime/algorithm
+  # 也可以手动指定: "D:/algorithms" 或 "/opt/algorithms"
