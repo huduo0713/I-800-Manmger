@@ -27,20 +27,21 @@ type DeviceRegisterService struct {
 
 // DeviceRegisterRequest 设备注册请求结构
 type DeviceRegisterRequest struct {
-	CmdId     string                      `json:"cmdId"`
-	Version   string                      `json:"version"`
-	Method    string                      `json:"method"`
-	Timestamp string                      `json:"timestamp"`
-	Params    DeviceRegisterRequestParams `json:"params"`
+	CmdId     string                    `json:"cmdId"`
+	Version   string                    `json:"version"`
+	Method    string                    `json:"method"`
+	Timestamp string                    `json:"timestamp"`
+	Data      DeviceRegisterRequestData `json:"data"`
 }
 
-// DeviceRegisterRequestParams 设备注册请求参数
-type DeviceRegisterRequestParams struct {
-	DeviceModule  string `json:"deviceModule"`  // 设备模块名
-	DeviceId      string `json:"deviceId"`      // 设备ID (MAC地址)
-	HeartBeat     int    `json:"heartBeat"`     // 心跳周期(秒)
-	IP            string `json:"IP"`            // 设备IP地址
-	RuntimeStatus int    `json:"runtimeStatus"` // Runtime进程状态 (1-正常运行，0-停止)
+// DeviceRegisterRequestData 设备注册请求数据
+type DeviceRegisterRequestData struct {
+	DeviceModule     string `json:"deviceModule"`     // 设备模块名
+	DeviceId         string `json:"deviceId"`         // 设备ID (MAC地址)
+	HeartBeat        int    `json:"heartBeat"`        // 心跳周期(秒)
+	IP               string `json:"IP"`               // 设备IP地址
+	RuntimeStatus    int    `json:"runtimeStatus"`    // Runtime进程状态 (1-正常运行，0-停止)
+	OpcuaServerPort  int    `json:"opcuaServerPort"`  // OPC UA服务器端口
 }
 
 // NewDeviceRegisterService 创建设备注册服务
@@ -121,6 +122,7 @@ func (s *DeviceRegisterService) buildRegisterMessage() (string, error) {
 	// 获取配置信息
 	deviceModule := g.Cfg().MustGet(ctx, "device.module", "I-800-RK").String()
 	heartBeat := g.Cfg().MustGet(ctx, "mqtt.keepAlive", 60).Int()
+	opcuaServerPort := g.Cfg().MustGet(ctx, "device.opcua.serverPort", 4840).Int()
 
 	// 检测 runtime 状态（1231端口监听状态）
 	runtimeStatus := s.portChecker.GetRuntimeStatus()
@@ -132,12 +134,13 @@ func (s *DeviceRegisterService) buildRegisterMessage() (string, error) {
 		Version:   "1.0",
 		Method:    "event.register",
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
-		Params: DeviceRegisterRequestParams{
-			DeviceModule:  deviceModule,
-			DeviceId:      s.deviceId,
-			HeartBeat:     heartBeat,
-			IP:            s.networkIface.IP,
-			RuntimeStatus: runtimeStatus,
+		Data: DeviceRegisterRequestData{
+			DeviceModule:    deviceModule,
+			DeviceId:        s.deviceId,
+			HeartBeat:       heartBeat,
+			IP:              s.networkIface.IP,
+			RuntimeStatus:   runtimeStatus,
+			OpcuaServerPort: opcuaServerPort,
 		},
 	}
 
@@ -190,6 +193,10 @@ func (s *DeviceRegisterService) publishRegisterMessage(topic, message string) er
 	g.Log().Infof(ctx, "   🏷️ 设备ID: %s", s.deviceId)
 	g.Log().Infof(ctx, "   🌐 IP地址: %s", s.networkIface.IP)
 	g.Log().Infof(ctx, "   💻 网卡: %s (%s)", s.networkIface.Name, s.networkIface.MAC)
+	
+	// 获取OPC UA端口信息并显示
+	opcuaPort := g.Cfg().MustGet(s.ctx, "device.opcua.serverPort", 4840).Int()
+	g.Log().Infof(ctx, "   🏭 OPC UA: %s:%d", s.networkIface.IP, opcuaPort)
 
 	return nil
 }

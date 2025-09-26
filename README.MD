@@ -2005,25 +2005,31 @@ device:
   - `0`: Runtime进程停止或异常（端口未监听）
 
 ### 上报字段
-设备注册时会在MQTT消息中包含`runtimeStatus`字段：
+设备注册时会在MQTT消息中包含`runtimeStatus`和`opcuaServerPort`字段：
 ```json
 {
-  "params": {
+  "data": {
     "deviceModule": "I-800-RK",
     "deviceId": "F2-D5-4F-C7-2B-AD",
     "heartBeat": 10,
     "IP": "192.168.11.204",
-    "runtimeStatus": 1
+    "runtimeStatus": 1,
+    "opcuaServerPort": 4840
   }
 }
 ```
 
 ### 自定义端口
-如需修改Runtime监听端口，只需更新配置文件：
+如需修改相关服务端口，只需更新配置文件：
 ```yaml
 device:
+  # Runtime状态检测端口
   runtime:
-    port: 1234              # 修改为实际端口
+    port: 1234              # 修改为实际Runtime监听端口
+  
+  # OPC UA服务端口  
+  opcua:
+    serverPort: 4841        # 修改为实际OPC UA服务端口
 ```
 无需重新编译程序，重启服务即可生效。
 
