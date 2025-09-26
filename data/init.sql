@@ -38,34 +38,34 @@ CREATE TABLE IF NOT EXISTS `algorithm` (
   `local_path` TEXT, -- 本地存储路径
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  
+
   -- 复合唯一约束：同一算法ID+版本只能有一条记录
   UNIQUE(algorithm_id, algorithm_version)
 );
 
 -- 创建触发器：自动更新updated_at时间戳
-CREATE TRIGGER IF NOT EXISTS algorithm_updated_at 
-AFTER UPDATE ON algorithm 
+CREATE TRIGGER IF NOT EXISTS algorithm_updated_at
+AFTER UPDATE ON algorithm
 FOR EACH ROW
 BEGIN
   UPDATE algorithm SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- 插入示例算法数据
-INSERT OR IGNORE INTO `algorithm` (
-  `algorithm_id`, 
-  `algorithm_name`, 
-  `algorithm_version`, 
-  `algorithm_version_id`, 
-  `algorithm_data_url`, 
-  `file_size`, 
-  `md5`
-) VALUES (
-  'uuid-1234',
-  '夜间节能策略算法',
-  '1.0',
-  'uuid-1234',
-  'http://113.249.91.53:9001/haikang/algorithmZip/5fe37a4d248b413d8e62057bc6adb11c',
-  5242880,
-  'a1b2c3d4e5f67890abcdef1234567890'
-);
+-- INSERT OR IGNORE INTO `algorithm` (
+--   `algorithm_id`,
+--   `algorithm_name`,
+--   `algorithm_version`,
+--   `algorithm_version_id`,
+--   `algorithm_data_url`,
+--   `file_size`,
+--   `md5`
+-- ) VALUES (
+--   'uuid-1234',
+--   '夜间节能策略算法',
+--   '1.0',
+--   'uuid-1234',
+--   'http://113.249.91.53:9001/haikang/algorithmZip/5fe37a4d248b413d8e62057bc6adb11c',
+--   5242880,
+--   'a1b2c3d4e5f67890abcdef1234567890'
+-- );

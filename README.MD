@@ -169,7 +169,7 @@ hack/
 internal/service/
 ├── algorithm_common.go     # 🔧 公共组件
 │   ├── AlgorithmAddRequest
-│   ├── AlgorithmDeleteRequest  
+│   ├── AlgorithmDeleteRequest
 │   ├── AlgorithmReply
 │   └── 错误码常量 (CodeSuccess, CodeDownloadFailed等)
 │
@@ -221,31 +221,31 @@ hack/
 # 边缘设备配置
 device:
   id: "edge-device-001"
-  
+
 # MQTT服务配置 - 生产级可靠性增强
 mqtt:
   broker: "tcp://127.0.0.1:1883"  # 你的MQTT服务器地址
   clientId: "goframe-edge-device"
-  
+
   # 连接可靠性参数
   keepAlive: 60              # 心跳间隔(秒) - 检测连接状态
-  pingTimeout: 10            # Ping超时(秒) - 心跳响应超时判定  
+  pingTimeout: 10            # Ping超时(秒) - 心跳响应超时判定
   connectTimeout: 30         # 连接超时(秒) - 初始连接超时
-  
-  # 自动重连参数  
+
+  # 自动重连参数
   autoReconnect: true        # 启用自动重连
   maxReconnectInterval: 60   # 最大重连间隔(秒)
   connectRetryInterval: 5    # 重连尝试间隔(秒)
-  
+
   # 会话管理
   cleanSession: false        # 保持会话状态，支持离线消息
-  
+
   # 健康检查
   healthCheck:
     enable: true            # 启用健康检查
     interval: 30            # 检查间隔(秒)
 
-# 算法下载配置  
+# 算法下载配置
 algorithm:
   downloadPath: ""  # 留空自动适配平台路径
   # Windows: ./runtime/algorithm/
@@ -298,7 +298,7 @@ runtime/
 **根因**: MQTT连接采用同步阻塞方式，当网络环境不稳定时会导致整个启动流程卡死
 **影响**: 设备无法正常启动，影响生产部署
 
-#### ⚠️ 问题2: "假订阅"现象  
+#### ⚠️ 问题2: "假订阅"现象
 **现象**: MQTT重连后显示订阅成功，但实际收不到消息
 **根因**: 连接丢失后 `alreadySubscribed` 标志位未正确重置，导致重连时跳过订阅操作
 **影响**: 设备看似正常但无法接收云端指令，业务功能完全失效
@@ -331,10 +331,10 @@ func startMQTTAlgorithmService() {
 type sMqtt struct {
     // 当前激活订阅状态 (连接丢失时清空)
     subscriptions map[string]bool
-    
+
     // 保存的订阅意图 (连接丢失时保留，用于恢复)
     savedSubscriptions map[string]bool
-    
+
     // 其他字段...
 }
 ```
@@ -349,20 +349,20 @@ type sMqtt struct {
 mqtt:
   broker: "tcp://your-mqtt-server:1883"
   clientId: "edge-device-{deviceId}"
-  
+
   # 连接可靠性参数
   keepAlive: 60              # 心跳间隔(秒) - 检测连接状态
-  pingTimeout: 10            # Ping超时(秒) - 心跳响应超时判定  
+  pingTimeout: 10            # Ping超时(秒) - 心跳响应超时判定
   connectTimeout: 30         # 连接超时(秒) - 初始连接超时
-  
-  # 自动重连参数  
+
+  # 自动重连参数
   autoReconnect: true        # 启用自动重连
   maxReconnectInterval: 60   # 最大重连间隔(秒)
   connectRetryInterval: 5    # 重连尝试间隔(秒)
-  
+
   # 会话管理
   cleanSession: false        # 保持会话状态，支持离线消息
-  
+
   # 健康检查
   healthCheck:
     enable: true            # 启用健康检查
@@ -434,7 +434,7 @@ HTTP服务正常启动 ✅
 ```go
 func (s *sMqtt) OnConnectionLost(client mqtt.Client, err error) {
     g.Log().Warningf(ctx, "MQTT连接丢失: %v", err)
-    
+
     // 保存当前订阅状态用于重连后恢复
     s.mu.Lock()
     s.savedSubscriptions = make(map[string]bool)
@@ -452,7 +452,7 @@ func (s *sMqtt) OnConnectionLost(client mqtt.Client, err error) {
 func (s *sMqtt) reconnectSubscriptions() {
     s.mu.Lock()
     defer s.mu.Unlock()
-    
+
     // 从保存的订阅状态中恢复
     for topic, _ := range s.savedSubscriptions {
         if token := s.client.Subscribe(topic, 1, s.handleMessage); token.Wait() && token.Error() != nil {
@@ -479,7 +479,7 @@ go run .
 # 验证: 应该能看到HTTP服务正常启动，而不是卡在MQTT连接
 ```
 
-#### 2. 假订阅问题测试  
+#### 2. 假订阅问题测试
 ```bash
 # 1. 正常启动程序并连接MQTT
 go run .
@@ -544,7 +544,7 @@ grep "异步启动MQTT" logs/app-*.log
 ### 📋 整体架构流程
 
 ```
-程序启动 
+程序启动
    ↓
 cmd/cmd.go 调用 startMQTTAlgorithmService() (异步非阻塞)
    ↓
@@ -552,7 +552,7 @@ cmd/cmd.go 调用 startMQTTAlgorithmService() (异步非阻塞)
    ↓
 调用 StartAlgorithmMessageListener() 订阅配置化主题
    ↓ (并行进行健康检查与自动重连)
-接收MQTT消息 → handleAlgorithmMessage() 
+接收MQTT消息 → handleAlgorithmMessage()
    ↓
 解析JSON → 根据method调用对应处理器
    ↓
@@ -577,7 +577,7 @@ sendAlgorithmReply() 发送MQTT响应到配置化回复主题
 ```go
 // 验证必要参数
 - algorithmId: 算法唯一标识
-- algorithmDataUrl: 文件下载URL  
+- algorithmDataUrl: 文件下载URL
 - md5: 文件完整性校验值
 // 缺少任何参数返回错误码 1005
 ```
@@ -603,14 +603,14 @@ sendAlgorithmReply() 发送MQTT响应到配置化回复主题
 
 错误处理:
 - 下载失败 → 错误码 1001
-- MD5校验失败 → 错误码 1002  
+- MD5校验失败 → 错误码 1002
 - 文件系统错误 → 错误码 1003
 - 🆕 解压失败 → 错误码 1007
 ```
 
 #### 4. **数据库同步** 🗃️
 ```go
-// 位置: internal/service/algorithm_add.go  
+// 位置: internal/service/algorithm_add.go
 // 功能: SyncAlgorithmToDatabase() - 增强版本管理
 
 🆕 版本去重机制:
@@ -654,7 +654,7 @@ sendAlgorithmReply() 发送MQTT响应到配置化回复主题
 
 失败响应 (code: 非0):
 {
-  "cmdId": "原请求ID", 
+  "cmdId": "原请求ID",
   "code": 1001-1005,
   "message": "具体错误信息"
 }
@@ -743,7 +743,7 @@ go run .
 {
   "cmdId": "test-001",
   "version": "1.0",
-  "method": "algorithm.add", 
+  "method": "algorithm.add",
   "timestamp": "2025-09-18 17:30:01",
   "code": 0,
   "message": "算法添加成功",
@@ -759,7 +759,7 @@ go run .
 
 ✅ **成功标志**:
 1. **版本化目录**: 项目根目录下 `runtime/algorithm/algo-test-001/version-001/`
-2. **文件完整性**: 
+2. **文件完整性**:
    - 原始ZIP文件: `algorithm.zip`
    - 自动解压文件: `config.json`, `lib.so` 等
 3. **数据库记录**: SQLite数据库中 `algorithm` 表新增记录，包含版本信息
@@ -795,7 +795,7 @@ MQTT请求接收
 创建版本化目录结构 (algorithm/{algorithmId}/{algorithmVersionId}/)
     ↓
 文件下载 (错误码1001) ❌→ 清理空目录
-    ↓  
+    ↓
 MD5校验 (错误码1002) ❌→ 删除文件 + 清理空目录
     ↓
 🆕 ZIP自动解压 (错误码1007) ❌→ 删除文件 + 清理空目录
@@ -946,7 +946,7 @@ if oldVersionId != "" && oldVersionId != req.AlgorithmVersionId {
 
 🧹 智能清理机制增强:
 - cleanupDirectoryOnFailure() 支持版本化目录清理
-- 避免失败后留下 runtime/algorithm/{algorithmId}/{versionId}/ 空文件夹  
+- 避免失败后留下 runtime/algorithm/{algorithmId}/{versionId}/ 空文件夹
 - 只删除确认为空的目录，保护现有算法版本
 - 🔧 **Windows文件句柄优化**: 确保HTTP响应体和ZIP文件正确关闭
 - 🔄 **重试机制**: 带延迟重试的目录删除，提高清理成功率
@@ -970,7 +970,7 @@ if oldVersionId != "" && oldVersionId != req.AlgorithmVersionId {
   📥 执行完整下发流程
   📦 下载 → MD5校验 → ZIP解压 → 数据库记录
   🗂️ 新版本与现有版本并存，互不干扰
-  
+
 支持场景:
 - ✅ 同一算法的多个版本并存 (v1.0, v1.1, v2.0)
 - ✅ 版本升级时保留历史版本
@@ -979,10 +979,10 @@ if oldVersionId != "" && oldVersionId != req.AlgorithmVersionId {
 ```
   │
   ├── 清理旧算法目录 (/usr/runtime/algorithmId/)
-  ├── 下载新算法文件 
+  ├── 下载新算法文件
   ├── 更新数据库记录 (version、MD5、path等)
   └── 记录覆盖操作日志
-  
+
 支持场景:
 - 版本升级: v1.0 → v2.0
 - 相同版本覆盖: v1.0 → v1.0 (代码修正)
@@ -994,7 +994,7 @@ if oldVersionId != "" && oldVersionId != req.AlgorithmVersionId {
 - 🔄 **存在算法**: `UPDATE` 所有字段 (版本、MD5、路径、文件大小等)
 - 🧹 **旧文件清理**: 删除整个algorithmId目录，确保无残留
 
-**重要说明**: 
+**重要说明**:
 - ⚠️ **如果文件下载成功但数据库写入失败**: 文件已存储到本地，但数据库无记录
 - ✅ **错误恢复**: 重新发送相同请求，系统会检查现有文件并尝试重新同步数据库
 - 🧹 **智能清理**: 下载失败时自动清理创建的空目录，避免磁盘垃圾
@@ -1022,7 +1022,7 @@ MQTT请求 → 参数验证 → 文件下载 → MD5校验 → 数据库同步 �
 
 **流程特点**:
 - 🔐 **安全可靠**: 每步都有错误处理和回滚机制
-- ⚡ **高性能**: 异步处理，不阻塞MQTT主线程  
+- ⚡ **高性能**: 异步处理，不阻塞MQTT主线程
 - 📊 **可观测**: 详细日志记录每个处理步骤
 - 🎯 **配置化**: 主题、路径、服务器地址均可配置
 - 🔄 **幂等性**: 相同请求多次执行结果一致
@@ -1033,7 +1033,7 @@ MQTT请求 → 参数验证 → 文件下载 → MD5校验 → 数据库同步 �
 service.Mqtt() → 全局MQTT客户端实例
     ↓
 StartAlgorithmMessageListener() → 订阅配置化主题
-    ↓  
+    ↓
 handleAlgorithmMessage() → 消息路由分发
     ↓
 NewAlgorithmDownloadService() → 创建专用下载服务
@@ -1093,7 +1093,7 @@ case "algorithm.delete":
 如需对外提供算法查询接口：
 
 1. **创建API结构** (`api/algorithm/v1/`)
-2. **实现Controller** (`internal/controller/algorithm/`)  
+2. **实现Controller** (`internal/controller/algorithm/`)
 3. **调用Service层** 复用现有业务逻辑
 
 ### 数据库操作
@@ -1103,7 +1103,7 @@ case "algorithm.delete":
 // 查询算法
 algorithms, err := dao.Algorithm.Ctx(ctx).All()
 
-// 新增算法 
+// 新增算法
 _, err := dao.Algorithm.Ctx(ctx).Data(algorithmData).Insert()
 ```
 
@@ -1127,7 +1127,7 @@ _, err := dao.Algorithm.Ctx(ctx).Data(algorithmData).Insert()
 
 ## 🎯 测试流程总结
 
-**是的，你的理解完全正确！** 
+**是的，你的理解完全正确！**
 
 ✅ **测试流程**：
 1. **启动项目**: `go run .`
@@ -1176,7 +1176,7 @@ MQTT消息接收 → algorithm.delete
 ```json
 {
   "cmdId": "delete-test-001",
-  "version": "1.0", 
+  "version": "1.0",
   "method": "algorithm.delete",
   "timestamp": "2025-09-15 14:30:01",
   "code": 0,
@@ -1247,7 +1247,7 @@ MQTT消息接收 → algorithm.show
 ```json
 {
   "cmdId": "show-test-001",
-  "version": "1.0", 
+  "version": "1.0",
   "method": "algorithm.show",
   "timestamp": "2025-09-18 15:30:01",
   "code": 0,
@@ -1260,7 +1260,7 @@ MQTT消息接收 → algorithm.show
       "runStatus": 1
     },
     {
-      "algorithmName": "智能调度算法", 
+      "algorithmName": "智能调度算法",
       "algorithmId": "algo-schedule-002",
       "algorithmVersion": "v2.1.0",
       "runStatus": 0
@@ -1294,7 +1294,7 @@ algo:
 ### 📋 启停流程架构
 
 ```
-MQTT消息接收 → algorithm.config  
+MQTT消息接收 → algorithm.config
     ↓
 参数验证 (algorithmId + runStatus)
     ↓
@@ -1326,7 +1326,7 @@ MQTT消息接收 → algorithm.config
 {
   "cmdId": "config-test-001",
   "version": "1.0",
-  "method": "algorithm.config", 
+  "method": "algorithm.config",
   "timestamp": "2025-09-18 16:00:00",
   "params": {
     "algorithmId": "algo-power-save-001",
@@ -1341,7 +1341,7 @@ MQTT消息接收 → algorithm.config
   "cmdId": "config-test-001",
   "version": "1.0",
   "method": "algorithm.config",
-  "timestamp": "2025-09-18 16:00:01", 
+  "timestamp": "2025-09-18 16:00:01",
   "code": 0,
   "message": "success",
   "data": null
@@ -1362,7 +1362,7 @@ algo:
 ```yaml
 algo:
   runStatus: 0    # 已停止
-  name: "夜间节能策略算法" 
+  name: "夜间节能策略算法"
   version: "v1.2.0"
 ```
 
@@ -1399,7 +1399,7 @@ internal/service/
 │
 ├── algorithm_show.go           # 🆕 算法查询服务
 │   ├── AlgorithmShowService    # 查询服务类
-│   ├── GetAlgorithmList()      # 获取算法列表及运行状态 
+│   ├── GetAlgorithmList()      # 获取算法列表及运行状态
 │   ├── readAlgorithmRunStatus() # 读取算法运行状态
 │   ├── parseConfigFile()       # 解析config.yaml文件
 │   └── buildConfigPath()       # 构建配置文件路径
@@ -1726,7 +1726,7 @@ utility/                          # 工具函数库
 ### Hello模块
 - `GET /hello` - 简单的Hello接口
 
-### User模块  
+### User模块
 - `POST /user` - 创建用户
 - `GET /user` - 获取用户列表（支持年龄和状态筛选）
 - `GET /user/{id}` - 获取单个用户信息
@@ -1784,7 +1784,7 @@ utility/                          # 工具函数库
 ```go
 // 虚拟网卡过滤模式
 virtualPatterns := []string{
-    "docker", "veth", "br-", "virbr", "vmnet", "vbox", 
+    "docker", "veth", "br-", "virbr", "vmnet", "vbox",
     "tap", "tun", "lo", "dummy", "bond", "team", "vlan"
 }
 
@@ -1844,16 +1844,16 @@ if mqttService.isFirstConnect {
 device:
   id: "F2-D5-4F-C7-2B-AD"  # 运行时动态更新为实际MAC
   module: "I-800-RK"        # 设备模块名
-  
+
   # 🌐 网卡检测配置
   network:
     mode: "auto"            # 检测模式: auto/manual/config
-    
+
     # 手动指定网卡配置 (mode=manual时使用)
     interface: ""           # 网卡名称，如 "eth0", "wlan0"
     mac: ""                # MAC地址
     ip: ""                 # IP地址
-    
+
     # 网卡优先级配置 (mode=config时使用)
     priority:
       - "eth0"             # 有线网卡优先
@@ -1861,7 +1861,7 @@ device:
       - "enp"              # 新版Ubuntu网卡
       - "wlan"             # 无线网卡
       - "wlp"              # 新版无线网卡
-    
+
     # 连通性测试配置
     connectivity:
       timeout: 3           # 连接测试超时时间(秒)
@@ -1872,12 +1872,12 @@ device:
 ```yaml
 mqtt:
   # ClientID动态生成: edge-{MAC地址}
-  
+
   # 📡 主题配置
   topics:
     device:
       register: "/sys/i800/{deviceId}/event/register"
-  
+
   # 🏷️ 设备注册配置
   register:
     enable: true           # 启用设备注册功能
@@ -2000,7 +2000,7 @@ device:
 ### 检测机制
 - **检测方式**: 使用`net.DialTimeout`尝试连接本地端口
 - **超时时间**: 100ms，平衡检测速度和准确性
-- **返回值**: 
+- **返回值**:
   - `1`: Runtime进程正常运行（端口在监听）
   - `0`: Runtime进程停止或异常（端口未监听）
 
@@ -2026,8 +2026,8 @@ device:
   # Runtime状态检测端口
   runtime:
     port: 1234              # 修改为实际Runtime监听端口
-  
-  # OPC UA服务端口  
+
+  # OPC UA服务端口
   opcua:
     serverPort: 4841        # 修改为实际OPC UA服务端口
 ```

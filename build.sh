@@ -3,6 +3,9 @@
 
 set -e
 
+# 可执行文件名变量
+APP_NAME="app_mng"
+
 echo "🔨 开始构建 Edge Device Manager (Linux)..."
 
 # 获取版本信息
@@ -26,15 +29,15 @@ echo ""
 
 # 执行构建
 echo "🔄 正在编译..."
-go build -ldflags "${LDFLAGS}" -o edge-device .
+go build -ldflags "${LDFLAGS}" -o "${APP_NAME}" .
 
 if [ $? -eq 0 ]; then
-    echo "✅ 构建成功: edge-device"
+    echo "✅ 构建成功: ${APP_NAME}"
     echo ""
-    echo "🚀 运行程序请执行: ./edge-device"
-    echo "🔍 查看版本信息: ./edge-device --help"
+    echo "🚀 运行程序请执行: ./${APP_NAME}"
+    echo "🔍 查看版本信息: ./${APP_NAME} --help"
     echo "📁 当前目录: $(pwd)"
-    echo "📦 文件大小: $(ls -lh edge-device | awk '{print $5}')"
+    echo "📦 文件大小: $(ls -lh ${APP_NAME} | awk '{print $5}')"
 else
     echo "❌ 构建失败"
     exit 1

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -9,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gfile"
 
+	"demo/internal/consts"
 	"demo/internal/controller/algorithm"
 	"demo/internal/controller/user"
 	"demo/internal/service"
@@ -20,6 +22,9 @@ var (
 		Usage: "main",
 		Brief: "start http server",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			// 显示版本信息
+			printVersionInfo(ctx)
+
 			// 初始化数据库
 			initDatabase(ctx)
 
@@ -42,28 +47,80 @@ var (
 
 // initDatabase 初始化数据库表结构
 func initDatabase(ctx context.Context) {
+	g.Log().Info(ctx, "🗄️ 开始数据库初始化...")
+
+	// 测试数据库连接
+	db := g.DB()
+	if db == nil {
+		g.Log().Error(ctx, "❌ 数据库连接失败: 无法获取数据库实例")
+		return
+	}
+
+	// 测试数据库连通性
+	if err := db.PingMaster(); err != nil {
+		g.Log().Error(ctx, "❌ 数据库连接测试失败", g.Map{
+			"error": err,
+		})
+		return
+	}
+
+	g.Log().Info(ctx, "✅ 数据库连接测试成功")
+
+	// 获取数据库配置信息
+	config := db.GetConfig()
+	g.Log().Info(ctx, "📋 数据库配置信息", g.Map{
+		"type": config.Type,
+		"name": config.Name,
+		"host": config.Host,
+		"port": config.Port,
+	})
+
 	// 读取初始化SQL文件
 	sqlFile := "data/init.sql"
 	if !gfile.Exists(sqlFile) {
-		g.Log().Warning(ctx, "SQL init file not found:", sqlFile)
+		g.Log().Warning(ctx, "⚠️ SQL初始化文件不存在", g.Map{
+			"file": sqlFile,
+		})
 		return
 	}
 
 	sqlContent := gfile.GetContents(sqlFile)
 	if sqlContent == "" {
-		g.Log().Warning(ctx, "SQL init file is empty:", sqlFile)
+		g.Log().Warning(ctx, "⚠️ SQL初始化文件为空", g.Map{
+			"file": sqlFile,
+		})
 		return
 	}
+
+	g.Log().Info(ctx, "📄 SQL初始化文件读取成功", g.Map{
+		"file": sqlFile,
+		"size": len(sqlContent),
+	})
 
 	// 执行SQL初始化
-	db := g.DB()
 	_, err := db.Exec(ctx, sqlContent)
 	if err != nil {
-		g.Log().Errorf(ctx, "Failed to initialize database: %v", err)
+		g.Log().Error(ctx, "❌ 数据库初始化失败", g.Map{
+			"error": err,
+			"file":  sqlFile,
+		})
 		return
 	}
 
-	g.Log().Info(ctx, "Database initialized successfully")
+	// 验证表结构
+	tables, err := db.Tables(ctx)
+	if err != nil {
+		g.Log().Warning(ctx, "⚠️ 无法获取表列表", g.Map{
+			"error": err,
+		})
+	} else {
+		g.Log().Info(ctx, "📊 数据库表结构", g.Map{
+			"tables": tables,
+			"count":  len(tables),
+		})
+	}
+
+	g.Log().Info(ctx, "✅ 数据库初始化完成")
 }
 
 // startMQTTAlgorithmService 启动MQTT算法处理服务
@@ -117,4 +174,16 @@ func startMQTTAlgorithmService(ctx context.Context) {
 			"deviceId":   deviceId,
 		})
 	}()
+}
+
+// printVersionInfo 显示版本信息
+func printVersionInfo(ctx context.Context) {
+	g.Log().Info(ctx, "🚀 "+consts.AppName+" 启动", g.Map{
+		"version":   consts.AppVersion,
+		"buildTime": consts.BuildTime,
+		"gitCommit": consts.GitCommit,
+		"gitBranch": consts.GitBranch,
+		"goVersion": runtime.Version(),
+		"author":    consts.Author,
+	})
 }

@@ -28,7 +28,7 @@ GO_VERSION=$(go version | cut -d' ' -f3)
 # 显示构建信息
 echo -e "${YELLOW}📋 构建信息:${NC}"
 echo "  • Git提交: ${GIT_COMMIT}"
-echo "  • Git分支: ${GIT_BRANCH}"  
+echo "  • Git分支: ${GIT_BRANCH}"
 echo "  • 构建时间: ${BUILD_TIME}"
 echo "  • Go版本: ${GO_VERSION}"
 echo ""
@@ -42,7 +42,7 @@ if go build -ldflags "${LDFLAGS}" -o edge-device .; then
     echo "📦 可执行文件: $(pwd)/edge-device"
     echo "📏 文件大小: $(ls -lh edge-device | awk '{print $5}')"
     echo ""
-    
+
     # 询问是否运行
     read -p "🤔 是否立即运行程序? (y/N): " -n 1 -r
     echo ""

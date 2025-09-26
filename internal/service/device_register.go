@@ -36,12 +36,12 @@ type DeviceRegisterRequest struct {
 
 // DeviceRegisterRequestData 设备注册请求数据
 type DeviceRegisterRequestData struct {
-	DeviceModule     string `json:"deviceModule"`     // 设备模块名
-	DeviceId         string `json:"deviceId"`         // 设备ID (MAC地址)
-	HeartBeat        int    `json:"heartBeat"`        // 心跳周期(秒)
-	IP               string `json:"IP"`               // 设备IP地址
-	RuntimeStatus    int    `json:"runtimeStatus"`    // Runtime进程状态 (1-正常运行，0-停止)
-	OpcuaServerPort  int    `json:"opcuaServerPort"`  // OPC UA服务器端口
+	DeviceModule    string `json:"deviceModule"`    // 设备模块名
+	DeviceId        string `json:"deviceId"`        // 设备ID (MAC地址)
+	HeartBeat       int    `json:"heartBeat"`       // 心跳周期(秒)
+	IP              string `json:"IP"`              // 设备IP地址
+	RuntimeStatus   int    `json:"runtimeStatus"`   // Runtime进程状态 (1-正常运行，0-停止)
+	OpcuaServerPort int    `json:"opcuaServerPort"` // OPC UA服务器端口
 }
 
 // NewDeviceRegisterService 创建设备注册服务
@@ -193,7 +193,7 @@ func (s *DeviceRegisterService) publishRegisterMessage(topic, message string) er
 	g.Log().Infof(ctx, "   🏷️ 设备ID: %s", s.deviceId)
 	g.Log().Infof(ctx, "   🌐 IP地址: %s", s.networkIface.IP)
 	g.Log().Infof(ctx, "   💻 网卡: %s (%s)", s.networkIface.Name, s.networkIface.MAC)
-	
+
 	// 获取OPC UA端口信息并显示
 	opcuaPort := g.Cfg().MustGet(s.ctx, "device.opcua.serverPort", 4840).Int()
 	g.Log().Infof(ctx, "   🏭 OPC UA: %s:%d", s.networkIface.IP, opcuaPort)
