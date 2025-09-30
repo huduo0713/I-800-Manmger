@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"demo/internal/model/entity"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +13,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gfile"
 )
 
 // 定义我们的 MQTT 服务结构体
@@ -200,6 +203,9 @@ func Mqtt() *sMqtt {
 		// 创建客户端实例（在回调设置之后）
 		client := mqtt.NewClient(opts)
 		mqttService.client = client
+
+		// 📁 确保算法文件夹存在
+		ensureAlgorithmDir(ctx)
 
 		// �🔄 异步连接MQTT，避免阻塞主程序启动
 		go func() {
@@ -674,6 +680,8 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "success",
 	}
 
 	// 参数验证
@@ -747,8 +755,7 @@ func (s *sMqtt) handleAlgorithmAdd(req *AlgorithmAddRequest, deviceId string) {
 	}
 
 	// 成功响应
-	reply.Code = CodeSuccess
-	reply.Message = "算法添加成功"
+	reply.Message = "success"
 	reply.Data = map[string]interface{}{
 		"localPath":   localPath,
 		"algorithmId": req.Params.AlgorithmId,
@@ -774,6 +781,8 @@ func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmDeleteRequest, deviceId stri
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "success",
 	}
 
 	// 参数验证
@@ -796,15 +805,28 @@ func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmDeleteRequest, deviceId stri
 	// 执行算法删除
 	err := deleteService.DeleteAlgorithm(algorithmId)
 	if err != nil {
+		// 特殊处理：算法不存在时按照接口协议返回成功，但message警告
+		if strings.Contains(err.Error(), "算法不存在") {
+			g.Log().Warning(ctx, "算法不存在，按协议返回成功状态", g.Map{
+				"algorithmId": algorithmId,
+				"warning":     err.Error(),
+			})
+			// 算法不存在时，code=0（成功），message警告
+			reply.Message = fmt.Sprintf("警告：算法不存在: %s", algorithmId)
+			reply.Data = map[string]interface{}{
+				"algorithmId": algorithmId,
+			}
+			s.sendAlgorithmReply(&reply, deviceId)
+			return
+		}
+
+		// 其他错误正常处理
 		g.Log().Error(ctx, "删除算法失败", g.Map{
 			"algorithmId": algorithmId,
 			"error":       err,
 		})
 
-		// 根据错误类型设置错误码
-		if strings.Contains(err.Error(), "算法不存在") {
-			reply.Code = CodeAlgorithmNotFound
-		} else if strings.Contains(err.Error(), "数据库") {
+		if strings.Contains(err.Error(), "数据库") {
 			reply.Code = CodeDatabaseError
 		} else {
 			reply.Code = CodeFileSystemError
@@ -815,8 +837,7 @@ func (s *sMqtt) handleAlgorithmDelete(req *AlgorithmDeleteRequest, deviceId stri
 	}
 
 	// 成功响应
-	reply.Code = CodeSuccess
-	reply.Message = "算法删除成功"
+	reply.Message = "success"
 	reply.Data = map[string]interface{}{
 		"algorithmId": algorithmId,
 	}
@@ -838,6 +859,8 @@ func (s *sMqtt) handleAlgorithmShow(req *AlgorithmShowRequest, deviceId string) 
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "success",
 	}
 
 	// 使用算法查询服务获取算法列表
@@ -851,8 +874,6 @@ func (s *sMqtt) handleAlgorithmShow(req *AlgorithmShowRequest, deviceId string) 
 			"error":    err,
 		})
 	} else {
-		reply.Code = CodeSuccess
-		reply.Message = "success"
 		reply.Data = algorithmList
 		g.Log().Info(ctx, "algorithm.show处理成功", g.Map{
 			"deviceId": deviceId,
@@ -873,6 +894,8 @@ func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmConfigRequest, deviceId stri
 		Version:   req.Version,
 		Method:    req.Method,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Code:      CodeSuccess,
+		Message:   "success",
 	}
 
 	// 参数验证
@@ -903,8 +926,6 @@ func (s *sMqtt) handleAlgorithmConfig(req *AlgorithmConfigRequest, deviceId stri
 			"error":       err,
 		})
 	} else {
-		reply.Code = CodeSuccess
-		reply.Message = "success"
 		g.Log().Info(ctx, "algorithm.config处理成功", g.Map{
 			"deviceId":    deviceId,
 			"algorithmId": req.Params.AlgorithmId,
@@ -945,9 +966,14 @@ func (s *sMqtt) sendAlgorithmReply(reply *AlgorithmReply, deviceId string) {
 		})
 	} else {
 		g.Log().Info(ctx, "算法响应发送成功", g.Map{
-			"topic": replyTopic,
-			"cmdId": reply.CmdId,
-			"code":  reply.Code,
+			"topic":     replyTopic,
+			"cmdId":     reply.CmdId,
+			"version":   reply.Version,
+			"method":    reply.Method,
+			"timestamp": reply.Timestamp,
+			"code":      reply.Code,
+			"message":   reply.Message,
+			"reply":     string(replyJson),
 		})
 	}
 }
@@ -1056,4 +1082,53 @@ func (s *sMqtt) UpdateNetworkInterface() error {
 	}
 
 	return nil
+}
+
+// getAlgorithmDownloadPath 获取算法下载路径
+func getAlgorithmDownloadPath() string {
+	ctx := gctx.New()
+
+	// 从配置文件读取下载路径，支持跨平台
+	downloadPath := g.Cfg().MustGet(ctx, "algorithm.downloadPath").String()
+
+	// 如果配置文件未设置，使用默认路径
+	if downloadPath == "" {
+		if runtime.GOOS == "windows" {
+			// Windows环境：使用当前工作目录下的runtime/algorithm文件夹
+			downloadPath = "./runtime/algorithm"
+		} else {
+			// Linux/Unix环境：使用/usr/runtime/algorithm
+			downloadPath = "/usr/runtime/algorithm"
+		}
+	}
+
+	return downloadPath
+}
+
+// ensureAlgorithmDir 确保算法文件夹存在
+func ensureAlgorithmDir(ctx context.Context) {
+	// 获取算法下载路径
+	downloadPath := getAlgorithmDownloadPath()
+
+	// 检查目录是否存在
+	if gfile.IsDir(downloadPath) {
+		g.Log().Info(ctx, "📁 算法文件夹检查完成", g.Map{
+			"path":   downloadPath,
+			"status": "exists",
+		})
+	} else {
+		// 目录不存在，创建目录
+		if err := gfile.Mkdir(downloadPath); err != nil {
+			g.Log().Error(ctx, "❌ 创建算法文件夹失败", g.Map{
+				"path":  downloadPath,
+				"error": err,
+			})
+		} else {
+			g.Log().Info(ctx, "📁 算法文件夹检查完成", g.Map{
+				"path":   downloadPath,
+				"status": "created",
+				"note":   "文件夹不存在，已自动创建",
+			})
+		}
+	}
 }

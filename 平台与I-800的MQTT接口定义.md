@@ -1,4 +1,4 @@
-# MQTT 的 clientId ：edge-{MAC}
+
 
 # 下发算法-request
 
@@ -85,7 +85,7 @@
   "method": "algorithm.delete",
   "timestamp": "2023-10-27 10:06:00", // 指令下发时间
   "message": "success",
-  "code": 0,    // 0-成功；其他-失败
+  "code": 0,    // 0-成功；其他-失败 备注：当删除的算法不存在时，返回0， message警告提示算法不存在
   "data": null
 }
 ```
@@ -196,6 +196,7 @@
 **topic**:
 
 ``/sys/i800/{deviceId}/event/register``
+
 **payload**:
 
 ```
@@ -204,14 +205,14 @@
   "version":"1.0",
   "method": "event.register",   // 这个字段可以不判定，和topic是一致的
   "timestamp": "2023-10-27 10:06:00", // 事件上报时间
-   "params": {
+   "data": {
     "deviceModule": "I-800-RK",
   	"deviceId": "F2-D5-4F-C7-2B-AD",  // 设备ID
   	"heartBeat": 10,   // 心跳周期 单位秒
   	"IP": "192.168.11.204",
-    "runtimeStatus": 1   //查询本地的1231端口是否在LISTEN, 如果在监听，则返回1，表示runtime进程正常，否则返回0
+    "runtimeStatus": 1,   //查询本地的1231端口是否在LISTEN, 如果在监听，则返回1，表示runtime进程正常，否则返回0
+    "opcuaServerPort": 4840
   }
 }
 ```
-
 

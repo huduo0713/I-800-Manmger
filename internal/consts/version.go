@@ -3,7 +3,7 @@ package consts
 // 版本信息常量
 const (
 	AppName    = "Edge Device Manager"
-	AppVersion = "v2.4.0"
+	AppVersion = "v2.5.0"
 	Author     = "GoFrame Team"
 )
 

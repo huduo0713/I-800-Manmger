@@ -8,6 +8,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 可执行文件名变量
+APP_NAME="app_mng"
+
 echo -e "${BLUE}🚀 Edge Device Manager - 快速构建运行${NC}"
 echo "=================================="
 
@@ -37,10 +40,10 @@ echo ""
 echo -e "${BLUE}🔨 开始构建...${NC}"
 LDFLAGS="-X 'demo/internal/consts.BuildTime=${BUILD_TIME}' -X 'demo/internal/consts.GitCommit=${GIT_COMMIT}' -X 'demo/internal/consts.GitBranch=${GIT_BRANCH}' -X 'demo/internal/consts.GoVersion=${GO_VERSION}'"
 
-if go build -ldflags "${LDFLAGS}" -o edge-device .; then
+if go build -ldflags "${LDFLAGS}" -o "${APP_NAME}".; then
     echo -e "${GREEN}✅ 构建成功!${NC}"
-    echo "📦 可执行文件: $(pwd)/edge-device"
-    echo "📏 文件大小: $(ls -lh edge-device | awk '{print $5}')"
+    echo "📦 可执行文件: $(pwd)/${APP_NAME}"
+    echo "📏 文件大小: $(ls -lh ${APP_NAME} | awk '{print $5}')"
     echo ""
 
     # 询问是否运行
@@ -49,9 +52,9 @@ if go build -ldflags "${LDFLAGS}" -o edge-device .; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${GREEN}🚀 启动程序...${NC}"
         echo "=================================="
-        ./edge-device
+        ./${APP_NAME}
     else
-        echo -e "${YELLOW}💡 手动运行请执行: ./edge-device${NC}"
+        echo -e "${YELLOW}💡 手动运行请执行: ./${APP_NAME}${NC}"
     fi
 else
     echo -e "${RED}❌ 构建失败${NC}"
